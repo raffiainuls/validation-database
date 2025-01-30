@@ -1,0 +1,5 @@
+{
+    "dsn_oracle": "localhost:1521/XE", 
+    "username_oracle": "C##MYUSER",
+    "password_oracle": "oracle"
+}

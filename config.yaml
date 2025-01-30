@@ -1,0 +1,49 @@
+# id_column: "transaction_id"
+# ali_id_column: "transaction_id"
+
+database1: postgres # postgres, oracle, aws, ali
+database2: oracle # postgres, oracle, aws, ali 
+
+databases: ["oracle", "postgres"]
+data_type: string # integer, string, date
+is_using_manual_queries: no # yes, or no 
+batch_size: 10000
+threshold: 1 # threshold for fuzzy logic, used only for string validation
+
+
+
+# if using filter period please fill this item, and if not comment this item
+# start_date: "2014-01-01"
+# end_date: "2024-12-30"
+
+composite_id_columns: ["ID"] # composite id, if in table have unique id fill this with unique id 
+
+check_column: "MODEL" # Kolom yang akan diverifikasi
+
+
+
+aws_table_name:
+ali_table_name:
+postgres_table_name: "public.orders"
+oracle_table_name: "orders"
+
+postgres_database_date_column: "month_id"  # date column for first database
+oracle_database_date_column: "month_id" # date column for second database
+aws_database_date_column:
+ali_database_date_column:
+
+
+
+aws_date_column: "month_id"
+ali_date_column: "month_id"
+
+
+
+
+
+queries:
+  first_query: |
+      
+
+  second_query: |
+    

@@ -1,0 +1,234 @@
+2025-01-30 18:29:20,418 - INFO - Successfully loaded configuration from config.yaml
+2025-01-30 18:29:20,429 - INFO - Successfully loaded credentials from creds\ali.json
+2025-01-30 18:29:20,438 - INFO - Successfully loaded credentials from creds\aws.json
+2025-01-30 18:29:20,447 - INFO - Successfully loaded credentials from creds\oracle.json
+2025-01-30 18:29:20,458 - INFO - Successfully loaded credentials from creds\postgres.json
+2025-01-30 18:29:20,459 - INFO - Try to connect database oracle....
+2025-01-30 18:29:20,459 - INFO - dsn: localhost:1521/XE
+2025-01-30 18:29:20,459 - INFO - try to connect database postgres
+2025-01-30 18:29:20,459 - INFO - username: C##MYUSER
+2025-01-30 18:29:20,459 - INFO - hostname: localhost
+2025-01-30 18:29:20,525 - INFO - password: oracle
+2025-01-30 18:29:20,525 - INFO - port: 5432
+2025-01-30 18:29:20,526 - INFO - batch_size: 10000
+2025-01-30 18:29:20,526 - INFO - database: postgres
+2025-01-30 18:29:20,526 - INFO - execute with query:  
+2025-01-30 18:29:20,526 - INFO - username: postgres
+2025-01-30 18:29:20,526 - INFO - 
+                    SELECT 
+                        CAST(COALESCE(CAST(ID AS VARCHAR2(255)), '0') AS VARCHAR2(255)) AS id,
+                        MODEL
+                    FROM orders
+                
+2025-01-30 18:29:20,526 - INFO - password: postgres
+2025-01-30 18:29:34,093 - INFO - Execute with query: 
+2025-01-30 18:29:34,093 - INFO - 
+                    SELECT 
+                        CAST(COALESCE(CAST("ID" AS VARCHAR), '0') AS VARCHAR) AS id,
+                        "MODEL"
+                    FROM public.orders
+                
+2025-01-30 18:29:36,885 - INFO - Connected to Oracle database
+2025-01-30 18:29:36,885 - INFO - Executing query on Oracle ....
+2025-01-30 18:29:38,676 - INFO - Fetched Batch 1, rows so far: 2.
+2025-01-30 18:29:38,758 - INFO - Connection to Oracle closed.
+2025-01-30 18:29:38,904 - INFO - Connected to PostgreSQL database.
+2025-01-30 18:29:38,904 - INFO - Executing query on PostgreSQL...
+2025-01-30 18:30:24,553 - INFO - Fetched Batch 1, rows so far: 10000.
+2025-01-30 18:30:24,555 - INFO - Fetched Batch 2, rows so far: 20000.
+2025-01-30 18:30:24,558 - INFO - Fetched Batch 3, rows so far: 30000.
+2025-01-30 18:30:24,560 - INFO - Fetched Batch 4, rows so far: 40000.
+2025-01-30 18:30:24,565 - INFO - Fetched Batch 5, rows so far: 50000.
+2025-01-30 18:30:24,572 - INFO - Fetched Batch 6, rows so far: 60000.
+2025-01-30 18:30:24,575 - INFO - Fetched Batch 7, rows so far: 70000.
+2025-01-30 18:30:24,577 - INFO - Fetched Batch 8, rows so far: 80000.
+2025-01-30 18:30:24,579 - INFO - Fetched Batch 9, rows so far: 90000.
+2025-01-30 18:30:24,581 - INFO - Fetched Batch 10, rows so far: 100000.
+2025-01-30 18:30:24,584 - INFO - Fetched Batch 11, rows so far: 110000.
+2025-01-30 18:30:24,586 - INFO - Fetched Batch 12, rows so far: 120000.
+2025-01-30 18:30:24,588 - INFO - Fetched Batch 13, rows so far: 130000.
+2025-01-30 18:30:24,591 - INFO - Fetched Batch 14, rows so far: 140000.
+2025-01-30 18:30:24,593 - INFO - Fetched Batch 15, rows so far: 150000.
+2025-01-30 18:30:24,595 - INFO - Fetched Batch 16, rows so far: 160000.
+2025-01-30 18:30:24,597 - INFO - Fetched Batch 17, rows so far: 170000.
+2025-01-30 18:30:24,600 - INFO - Fetched Batch 18, rows so far: 180000.
+2025-01-30 18:30:24,602 - INFO - Fetched Batch 19, rows so far: 190000.
+2025-01-30 18:30:24,605 - INFO - Fetched Batch 20, rows so far: 200000.
+2025-01-30 18:30:24,607 - INFO - Fetched Batch 21, rows so far: 210000.
+2025-01-30 18:30:24,610 - INFO - Fetched Batch 22, rows so far: 220000.
+2025-01-30 18:30:24,612 - INFO - Fetched Batch 23, rows so far: 230000.
+2025-01-30 18:30:24,614 - INFO - Fetched Batch 24, rows so far: 240000.
+2025-01-30 18:30:24,617 - INFO - Fetched Batch 25, rows so far: 250000.
+2025-01-30 18:30:24,620 - INFO - Fetched Batch 26, rows so far: 260000.
+2025-01-30 18:30:24,622 - INFO - Fetched Batch 27, rows so far: 270000.
+2025-01-30 18:30:24,624 - INFO - Fetched Batch 28, rows so far: 280000.
+2025-01-30 18:30:24,627 - INFO - Fetched Batch 29, rows so far: 290000.
+2025-01-30 18:30:24,630 - INFO - Fetched Batch 30, rows so far: 300000.
+2025-01-30 18:30:24,633 - INFO - Fetched Batch 31, rows so far: 310000.
+2025-01-30 18:30:24,636 - INFO - Fetched Batch 32, rows so far: 320000.
+2025-01-30 18:30:24,640 - INFO - Fetched Batch 33, rows so far: 330000.
+2025-01-30 18:30:24,642 - INFO - Fetched Batch 34, rows so far: 340000.
+2025-01-30 18:30:24,644 - INFO - Fetched Batch 35, rows so far: 350000.
+2025-01-30 18:30:24,646 - INFO - Fetched Batch 36, rows so far: 360000.
+2025-01-30 18:30:24,648 - INFO - Fetched Batch 37, rows so far: 370000.
+2025-01-30 18:30:24,652 - INFO - Fetched Batch 38, rows so far: 380000.
+2025-01-30 18:30:24,654 - INFO - Fetched Batch 39, rows so far: 390000.
+2025-01-30 18:30:24,656 - INFO - Fetched Batch 40, rows so far: 400000.
+2025-01-30 18:30:24,658 - INFO - Fetched Batch 41, rows so far: 410000.
+2025-01-30 18:30:24,660 - INFO - Fetched Batch 42, rows so far: 420000.
+2025-01-30 18:30:24,664 - INFO - Fetched Batch 43, rows so far: 430000.
+2025-01-30 18:30:24,666 - INFO - Fetched Batch 44, rows so far: 440000.
+2025-01-30 18:30:24,668 - INFO - Fetched Batch 45, rows so far: 450000.
+2025-01-30 18:30:24,671 - INFO - Fetched Batch 46, rows so far: 460000.
+2025-01-30 18:30:24,673 - INFO - Fetched Batch 47, rows so far: 470000.
+2025-01-30 18:30:24,675 - INFO - Fetched Batch 48, rows so far: 480000.
+2025-01-30 18:30:24,679 - INFO - Fetched Batch 49, rows so far: 490000.
+2025-01-30 18:30:24,681 - INFO - Fetched Batch 50, rows so far: 500000.
+2025-01-30 18:30:24,683 - INFO - Fetched Batch 51, rows so far: 510000.
+2025-01-30 18:30:24,685 - INFO - Fetched Batch 52, rows so far: 520000.
+2025-01-30 18:30:24,687 - INFO - Fetched Batch 53, rows so far: 530000.
+2025-01-30 18:30:24,689 - INFO - Fetched Batch 54, rows so far: 540000.
+2025-01-30 18:30:24,692 - INFO - Fetched Batch 55, rows so far: 550000.
+2025-01-30 18:30:24,695 - INFO - Fetched Batch 56, rows so far: 560000.
+2025-01-30 18:30:24,698 - INFO - Fetched Batch 57, rows so far: 570000.
+2025-01-30 18:30:24,701 - INFO - Fetched Batch 58, rows so far: 580000.
+2025-01-30 18:30:24,703 - INFO - Fetched Batch 59, rows so far: 590000.
+2025-01-30 18:30:24,705 - INFO - Fetched Batch 60, rows so far: 600000.
+2025-01-30 18:30:24,708 - INFO - Fetched Batch 61, rows so far: 610000.
+2025-01-30 18:30:24,710 - INFO - Fetched Batch 62, rows so far: 620000.
+2025-01-30 18:30:24,712 - INFO - Fetched Batch 63, rows so far: 630000.
+2025-01-30 18:30:24,716 - INFO - Fetched Batch 64, rows so far: 640000.
+2025-01-30 18:30:24,718 - INFO - Fetched Batch 65, rows so far: 650000.
+2025-01-30 18:30:24,720 - INFO - Fetched Batch 66, rows so far: 660000.
+2025-01-30 18:30:24,722 - INFO - Fetched Batch 67, rows so far: 670000.
+2025-01-30 18:30:24,724 - INFO - Fetched Batch 68, rows so far: 680000.
+2025-01-30 18:30:24,727 - INFO - Fetched Batch 69, rows so far: 690000.
+2025-01-30 18:30:24,729 - INFO - Fetched Batch 70, rows so far: 700000.
+2025-01-30 18:30:24,731 - INFO - Fetched Batch 71, rows so far: 710000.
+2025-01-30 18:30:24,733 - INFO - Fetched Batch 72, rows so far: 720000.
+2025-01-30 18:30:24,738 - INFO - Fetched Batch 73, rows so far: 730000.
+2025-01-30 18:30:24,740 - INFO - Fetched Batch 74, rows so far: 740000.
+2025-01-30 18:30:24,742 - INFO - Fetched Batch 75, rows so far: 750000.
+2025-01-30 18:30:24,744 - INFO - Fetched Batch 76, rows so far: 760000.
+2025-01-30 18:30:24,746 - INFO - Fetched Batch 77, rows so far: 770000.
+2025-01-30 18:30:24,748 - INFO - Fetched Batch 78, rows so far: 780000.
+2025-01-30 18:30:24,750 - INFO - Fetched Batch 79, rows so far: 790000.
+2025-01-30 18:30:24,752 - INFO - Fetched Batch 80, rows so far: 800000.
+2025-01-30 18:30:24,754 - INFO - Fetched Batch 81, rows so far: 810000.
+2025-01-30 18:30:24,756 - INFO - Fetched Batch 82, rows so far: 820000.
+2025-01-30 18:30:24,761 - INFO - Fetched Batch 83, rows so far: 830000.
+2025-01-30 18:30:24,763 - INFO - Fetched Batch 84, rows so far: 840000.
+2025-01-30 18:30:24,766 - INFO - Fetched Batch 85, rows so far: 850000.
+2025-01-30 18:30:24,768 - INFO - Fetched Batch 86, rows so far: 860000.
+2025-01-30 18:30:24,770 - INFO - Fetched Batch 87, rows so far: 870000.
+2025-01-30 18:30:24,772 - INFO - Fetched Batch 88, rows so far: 880000.
+2025-01-30 18:30:24,774 - INFO - Fetched Batch 89, rows so far: 890000.
+2025-01-30 18:30:24,778 - INFO - Fetched Batch 90, rows so far: 900000.
+2025-01-30 18:30:24,780 - INFO - Fetched Batch 91, rows so far: 910000.
+2025-01-30 18:30:24,783 - INFO - Fetched Batch 92, rows so far: 920000.
+2025-01-30 18:30:24,785 - INFO - Fetched Batch 93, rows so far: 930000.
+2025-01-30 18:30:24,789 - INFO - Fetched Batch 94, rows so far: 940000.
+2025-01-30 18:30:24,792 - INFO - Fetched Batch 95, rows so far: 950000.
+2025-01-30 18:30:24,795 - INFO - Fetched Batch 96, rows so far: 960000.
+2025-01-30 18:30:24,797 - INFO - Fetched Batch 97, rows so far: 970000.
+2025-01-30 18:30:24,800 - INFO - Fetched Batch 98, rows so far: 980000.
+2025-01-30 18:30:24,802 - INFO - Fetched Batch 99, rows so far: 990000.
+2025-01-30 18:30:24,804 - INFO - Fetched Batch 100, rows so far: 1000000.
+2025-01-30 18:30:24,806 - INFO - Fetched Batch 101, rows so far: 1010000.
+2025-01-30 18:30:24,808 - INFO - Fetched Batch 102, rows so far: 1020000.
+2025-01-30 18:30:24,813 - INFO - Fetched Batch 103, rows so far: 1030000.
+2025-01-30 18:30:24,820 - INFO - Fetched Batch 104, rows so far: 1040000.
+2025-01-30 18:30:24,824 - INFO - Fetched Batch 105, rows so far: 1050000.
+2025-01-30 18:30:24,830 - INFO - Fetched Batch 106, rows so far: 1060000.
+2025-01-30 18:30:24,832 - INFO - Fetched Batch 107, rows so far: 1070000.
+2025-01-30 18:30:24,834 - INFO - Fetched Batch 108, rows so far: 1080000.
+2025-01-30 18:30:24,836 - INFO - Fetched Batch 109, rows so far: 1090000.
+2025-01-30 18:30:24,838 - INFO - Fetched Batch 110, rows so far: 1100000.
+2025-01-30 18:30:24,840 - INFO - Fetched Batch 111, rows so far: 1110000.
+2025-01-30 18:30:24,842 - INFO - Fetched Batch 112, rows so far: 1120000.
+2025-01-30 18:30:24,844 - INFO - Fetched Batch 113, rows so far: 1130000.
+2025-01-30 18:30:24,846 - INFO - Fetched Batch 114, rows so far: 1140000.
+2025-01-30 18:30:24,848 - INFO - Fetched Batch 115, rows so far: 1150000.
+2025-01-30 18:30:24,850 - INFO - Fetched Batch 116, rows so far: 1160000.
+2025-01-30 18:30:24,852 - INFO - Fetched Batch 117, rows so far: 1170000.
+2025-01-30 18:30:24,854 - INFO - Fetched Batch 118, rows so far: 1180000.
+2025-01-30 18:30:24,856 - INFO - Fetched Batch 119, rows so far: 1190000.
+2025-01-30 18:30:24,862 - INFO - Fetched Batch 120, rows so far: 1200000.
+2025-01-30 18:30:24,864 - INFO - Fetched Batch 121, rows so far: 1210000.
+2025-01-30 18:30:24,866 - INFO - Fetched Batch 122, rows so far: 1220000.
+2025-01-30 18:30:24,868 - INFO - Fetched Batch 123, rows so far: 1230000.
+2025-01-30 18:30:24,870 - INFO - Fetched Batch 124, rows so far: 1240000.
+2025-01-30 18:30:24,873 - INFO - Fetched Batch 125, rows so far: 1250000.
+2025-01-30 18:30:24,875 - INFO - Fetched Batch 126, rows so far: 1260000.
+2025-01-30 18:30:24,877 - INFO - Fetched Batch 127, rows so far: 1270000.
+2025-01-30 18:30:24,879 - INFO - Fetched Batch 128, rows so far: 1280000.
+2025-01-30 18:30:24,882 - INFO - Fetched Batch 129, rows so far: 1290000.
+2025-01-30 18:30:24,884 - INFO - Fetched Batch 130, rows so far: 1300000.
+2025-01-30 18:30:24,886 - INFO - Fetched Batch 131, rows so far: 1310000.
+2025-01-30 18:30:24,888 - INFO - Fetched Batch 132, rows so far: 1320000.
+2025-01-30 18:30:24,890 - INFO - Fetched Batch 133, rows so far: 1330000.
+2025-01-30 18:30:24,892 - INFO - Fetched Batch 134, rows so far: 1340000.
+2025-01-30 18:30:24,894 - INFO - Fetched Batch 135, rows so far: 1350000.
+2025-01-30 18:30:24,899 - INFO - Fetched Batch 136, rows so far: 1360000.
+2025-01-30 18:30:24,901 - INFO - Fetched Batch 137, rows so far: 1370000.
+2025-01-30 18:30:24,904 - INFO - Fetched Batch 138, rows so far: 1380000.
+2025-01-30 18:30:24,906 - INFO - Fetched Batch 139, rows so far: 1390000.
+2025-01-30 18:30:24,908 - INFO - Fetched Batch 140, rows so far: 1400000.
+2025-01-30 18:30:24,909 - INFO - Fetched Batch 141, rows so far: 1410000.
+2025-01-30 18:30:24,911 - INFO - Fetched Batch 142, rows so far: 1420000.
+2025-01-30 18:30:24,914 - INFO - Fetched Batch 143, rows so far: 1430000.
+2025-01-30 18:30:24,915 - INFO - Fetched Batch 144, rows so far: 1440000.
+2025-01-30 18:30:24,918 - INFO - Fetched Batch 145, rows so far: 1450000.
+2025-01-30 18:30:24,920 - INFO - Fetched Batch 146, rows so far: 1460000.
+2025-01-30 18:30:24,922 - INFO - Fetched Batch 147, rows so far: 1470000.
+2025-01-30 18:30:24,924 - INFO - Fetched Batch 148, rows so far: 1480000.
+2025-01-30 18:30:24,926 - INFO - Fetched Batch 149, rows so far: 1490000.
+2025-01-30 18:30:24,928 - INFO - Fetched Batch 150, rows so far: 1500000.
+2025-01-30 18:30:24,930 - INFO - Fetched Batch 151, rows so far: 1510000.
+2025-01-30 18:30:24,932 - INFO - Fetched Batch 152, rows so far: 1520000.
+2025-01-30 18:30:24,934 - INFO - Fetched Batch 153, rows so far: 1530000.
+2025-01-30 18:30:24,940 - INFO - Fetched Batch 154, rows so far: 1540000.
+2025-01-30 18:30:24,943 - INFO - Fetched Batch 155, rows so far: 1550000.
+2025-01-30 18:30:24,945 - INFO - Fetched Batch 156, rows so far: 1560000.
+2025-01-30 18:30:24,947 - INFO - Fetched Batch 157, rows so far: 1570000.
+2025-01-30 18:30:24,949 - INFO - Fetched Batch 158, rows so far: 1580000.
+2025-01-30 18:30:24,952 - INFO - Fetched Batch 159, rows so far: 1590000.
+2025-01-30 18:30:24,955 - INFO - Fetched Batch 160, rows so far: 1600000.
+2025-01-30 18:30:24,957 - INFO - Fetched Batch 161, rows so far: 1610000.
+2025-01-30 18:30:24,959 - INFO - Fetched Batch 162, rows so far: 1620000.
+2025-01-30 18:30:24,961 - INFO - Fetched Batch 163, rows so far: 1630000.
+2025-01-30 18:30:24,963 - INFO - Fetched Batch 164, rows so far: 1640000.
+2025-01-30 18:30:24,966 - INFO - Fetched Batch 165, rows so far: 1650000.
+2025-01-30 18:30:24,968 - INFO - Fetched Batch 166, rows so far: 1660000.
+2025-01-30 18:30:24,970 - INFO - Fetched Batch 167, rows so far: 1670000.
+2025-01-30 18:30:24,972 - INFO - Fetched Batch 168, rows so far: 1680000.
+2025-01-30 18:30:24,975 - INFO - Fetched Batch 169, rows so far: 1690000.
+2025-01-30 18:30:24,977 - INFO - Fetched Batch 170, rows so far: 1700000.
+2025-01-30 18:30:24,978 - INFO - Fetched Batch 171, rows so far: 1710000.
+2025-01-30 18:30:24,980 - INFO - Fetched Batch 172, rows so far: 1720000.
+2025-01-30 18:30:24,983 - INFO - Fetched Batch 173, rows so far: 1730000.
+2025-01-30 18:30:24,990 - INFO - Fetched Batch 174, rows so far: 1740000.
+2025-01-30 18:30:24,992 - INFO - Fetched Batch 175, rows so far: 1750000.
+2025-01-30 18:30:24,994 - INFO - Fetched Batch 176, rows so far: 1760000.
+2025-01-30 18:30:24,996 - INFO - Fetched Batch 177, rows so far: 1770000.
+2025-01-30 18:30:24,998 - INFO - Fetched Batch 178, rows so far: 1780000.
+2025-01-30 18:30:25,000 - INFO - Fetched Batch 179, rows so far: 1790000.
+2025-01-30 18:30:25,002 - INFO - Fetched Batch 180, rows so far: 1800000.
+2025-01-30 18:30:25,004 - INFO - Fetched Batch 181, rows so far: 1810000.
+2025-01-30 18:30:25,006 - INFO - Fetched Batch 182, rows so far: 1820000.
+2025-01-30 18:30:25,008 - INFO - Fetched Batch 183, rows so far: 1830000.
+2025-01-30 18:30:25,011 - INFO - Fetched Batch 184, rows so far: 1840000.
+2025-01-30 18:30:25,013 - INFO - Fetched Batch 185, rows so far: 1850000.
+2025-01-30 18:30:25,016 - INFO - Fetched Batch 186, rows so far: 1860000.
+2025-01-30 18:30:25,018 - INFO - Fetched Batch 187, rows so far: 1870000.
+2025-01-30 18:30:25,021 - INFO - Fetched Batch 188, rows so far: 1880000.
+2025-01-30 18:30:25,023 - INFO - Fetched Batch 189, rows so far: 1890000.
+2025-01-30 18:30:25,025 - INFO - Fetched Batch 190, rows so far: 1900000.
+2025-01-30 18:30:25,026 - INFO - Fetched Batch 191, rows so far: 1910000.
+2025-01-30 18:30:25,028 - INFO - Fetched Batch 192, rows so far: 1920000.
+2025-01-30 18:30:25,031 - INFO - Fetched Batch 193, rows so far: 1930000.
+2025-01-30 18:30:25,033 - INFO - Fetched Batch 194, rows so far: 1939484.
+2025-01-30 18:30:25,052 - INFO - Connection to PostgreSQL closed.
+2025-01-30 18:30:26,769 - INFO - Starting Validate Data
+2025-01-30 18:30:26,769 - INFO - Column Check is String
+2025-01-30 18:30:26,874 - INFO - Processing Find Missing IDs
