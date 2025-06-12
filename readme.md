@@ -11,6 +11,7 @@ This tool has the ability to:
 - Missing ID Detection: finds any Ids that are missing between the databases and save into csv file 
 - Value Discrepancy Detection: Compares Values of records with the same ID across different databases and save output into csv file 
 - Multi Database Support: initially built for AWS and Alibaba, but now supports AWS athena, Alibaba Maxcompute, Oracle, ad postgreSQL databases
+- Optional date filtering 
 
 ## Getting Started
 
@@ -21,3 +22,17 @@ Follow these steps to set up and use the Data Validator tool locally.
 Before you begin, ensure you have the following this:
 - Python 
 - Access to the Databases (AWS, Alibaba, Oracle, PostgreSQL)
+
+
+### Steps 
+1. clone this repository
+```bash
+   git clone https://github.com/raffiainuls/validation-database.git
+```
+2. for use this project is very simple, Before running the validation tool, you must configure your settings in the config.yaml file.
+3. All results will be saved to the /output directory.
+4. first csv contains
+   - IDs missing in either database
+   - Differing values on the target column
+5. and second Shows row-by-row discrepancies in the target column.
+6. after fill the config.yaml you can go to validation.ipynb and run from there 
