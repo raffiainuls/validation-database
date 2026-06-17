@@ -1,0 +1,19 @@
+# MySQL ws_order_item_stocks vs ClickHouse raw_ws_order_item_stocks on order_id (~9.9M rows)
+database1: mysql
+database2: clickhouse
+
+databases: ["mysql", "clickhouse"]
+data_type: integer
+is_using_manual_queries: no
+batch_size: 100000
+threshold: 1
+
+chunk_by_id: yes
+id_chunk_size: 2000000
+clickhouse_final: yes
+
+composite_id_columns: ["id"]
+check_column: "order_id"
+
+mysql_table_name: "ws_order_item_stocks"
+clickhouse_table_name: "raw_ws_order_item_stocks"

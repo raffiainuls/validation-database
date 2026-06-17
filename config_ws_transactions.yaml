@@ -1,0 +1,33 @@
+# MySQL ws_transactions vs ClickHouse raw_ws_transactions on activity_id (~60M rows)
+database1: mysql
+database2: clickhouse
+
+databases: ["mysql", "clickhouse"]
+data_type: integer
+is_using_manual_queries: no   # chunked path builds its own range queries
+batch_size: 100000
+threshold: 1
+
+# Chunked-by-id validation: memory-safe, checks missing IDs across ALL periods.
+chunk_by_id: yes
+id_chunk_size: 2000000        # rows per id range fetched from each DB
+clickhouse_final: yes         # apply FINAL on the ReplacingMergeTree raw table
+
+composite_id_columns: ["id"]
+check_column: "activity_id"
+
+mysql_table_name: "ws_transactions"
+clickhouse_table_name: "raw_ws_transactions"
+
+queries:
+  first_query: |
+    SELECT
+      id,
+      activity_id
+    FROM ws_transactions
+
+  second_query: |
+    SELECT
+      id,
+      activity_id
+    FROM raw_ws_transactions FINAL

@@ -1,0 +1,19 @@
+# MySQL ws_patients vs ClickHouse raw_ws_patients on gender (~355K rows)
+database1: mysql
+database2: clickhouse
+
+databases: ["mysql", "clickhouse"]
+data_type: integer
+is_using_manual_queries: no
+batch_size: 100000
+threshold: 1
+
+chunk_by_id: yes
+id_chunk_size: 500000
+clickhouse_final: yes
+
+composite_id_columns: ["id"]
+check_column: "gender"
+
+mysql_table_name: "ws_patients"
+clickhouse_table_name: "raw_ws_patients"

@@ -1,0 +1,28 @@
+# Staging test config: MySQL vs ClickHouse on asset_models (1095 rows)
+database1: mysql
+database2: clickhouse
+
+databases: ["mysql", "clickhouse"]
+data_type: string            # integer, string, date
+is_using_manual_queries: yes  # manual queries used for the mysql<->clickhouse pair
+batch_size: 10000
+threshold: 1                  # 1 = exact match; lower (e.g. 0.85) for fuzzy
+
+composite_id_columns: ["id"]
+check_column: "name"
+
+mysql_table_name: "asset_models"
+clickhouse_table_name: "raw_asset_models"
+
+queries:
+  first_query: |
+    SELECT
+      id,
+      name
+    FROM asset_models
+
+  second_query: |
+    SELECT
+      id,
+      name
+    FROM raw_asset_models FINAL
