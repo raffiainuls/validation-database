@@ -53,12 +53,45 @@ def load_all_credentials():
 
     return credentials
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        logging.error("Usage: python config.py <config_file>")
-        sys.exit(1)
+def parse_args(argv):
+    """Parse: python config.py <config_file> [--mode missing|full].
 
-    config_file = sys.argv[1]
+    --mode missing : only detect missing IDs between source and target.
+    --mode full    : detect missing IDs AND compare values across all common
+                     columns (default).
+    """
+    config_file = None
+    mode = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == '--mode':
+            if i + 1 >= len(argv):
+                logging.error("--mode requires a value: missing | full")
+                sys.exit(1)
+            mode = argv[i + 1].lower()
+            i += 2
+        elif arg.startswith('--mode='):
+            mode = arg.split('=', 1)[1].lower()
+            i += 1
+        elif config_file is None:
+            config_file = arg
+            i += 1
+        else:
+            logging.error(f"Unexpected argument: {arg}")
+            sys.exit(1)
+
+    if config_file is None:
+        logging.error("Usage: python config.py <config_file> [--mode missing|full]")
+        sys.exit(1)
+    if mode is not None and mode not in ('missing', 'full'):
+        logging.error(f"Invalid --mode '{mode}'. Use 'missing' or 'full'.")
+        sys.exit(1)
+    return config_file, mode
+
+
+if __name__ == "__main__":
+    config_file, mode = parse_args(sys.argv[1:])
 
     # Load configuration and all credentials
     config = load_config(config_file)
@@ -66,6 +99,10 @@ if __name__ == "__main__":
 
     # Merge credentials into the config dictionary
     config['credentials'] = credentials
+
+    # CLI --mode overrides any 'mode' set in the YAML config.
+    if mode is not None:
+        config['mode'] = mode
 
     # Run the validation process with the merged configuration
     run_validation(config)

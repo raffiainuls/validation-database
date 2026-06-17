@@ -688,6 +688,100 @@ def compare_chunk(first_df, second_df, check_column, data_type, threshold, datab
     return missing_in_db1, missing_in_db2, records
 
 
+# ClickHouse / dlt internal columns that should never be compared as data.
+CLICKHOUSE_META_COLUMNS = {'ingested_at', 'version', '_dlt_load_id', '_dlt_id'}
+
+
+def detect_value_columns(fetch_data, database1, table1, database2, table2, id_column, extra_excludes=None):
+    """Return the list of columns present in BOTH tables, excluding the id column
+    and ClickHouse/dlt meta columns. Order follows the source table."""
+    src_cols = list(fetch_data(database1, f"SELECT * FROM {table1} LIMIT 1").columns)
+    tgt_cols = set(fetch_data(database2, f"SELECT * FROM {table2} LIMIT 1").columns)
+    excludes = set(CLICKHOUSE_META_COLUMNS)
+    excludes.add(id_column)
+    if extra_excludes:
+        excludes.update(extra_excludes)
+    return [c for c in src_cols if c in tgt_cols and c not in excludes]
+
+
+def build_range_query_multi(database, id_column, value_columns, table_name, lo, hi, use_final=False):
+    """Build a per-id-range query selecting the id plus the given value columns.
+    If value_columns is empty (missing-only mode), only the id is fetched."""
+    final = " FINAL" if (database == 'clickhouse' and use_final) else ""
+    if database == 'postgres':
+        sel = f'"{id_column}" AS id'
+        if value_columns:
+            sel += ", " + ", ".join(f'"{c}"' for c in value_columns)
+        return f'SELECT {sel} FROM {table_name} WHERE "{id_column}" BETWEEN {lo} AND {hi}'
+    sel = f"{id_column} AS id"
+    if value_columns:
+        sel += ", " + ", ".join(value_columns)
+    return f"SELECT {sel} FROM {table_name}{final} WHERE {id_column} BETWEEN {lo} AND {hi}"
+
+
+def _column_diff_mask(a, b, threshold):
+    """Type-aware 'values differ' mask for two aligned Series, treating
+    (NaN, NaN) / (None, None) as equal. Numeric vs numeric -> numeric compare;
+    datetime -> datetime compare; otherwise string compare."""
+    from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
+    if is_numeric_dtype(a) and is_numeric_dtype(b):
+        an, bn = pd.to_numeric(a, errors='coerce'), pd.to_numeric(b, errors='coerce')
+        return (an != bn) & ~(an.isna() & bn.isna())
+    if is_datetime64_any_dtype(a) or is_datetime64_any_dtype(b):
+        an, bn = pd.to_datetime(a, errors='coerce'), pd.to_datetime(b, errors='coerce')
+        return (an != bn) & ~(an.isna() & bn.isna())
+    an, bn = a.astype('string'), b.astype('string')
+    return (an != bn) & ~(an.isna() & bn.isna())
+
+
+def compare_chunk_multi(first_df, second_df, value_columns, mode, threshold, database1, database2):
+    """Compare one id-range chunk across (optionally) many columns.
+
+    mode='missing' -> only missing-id detection (value_columns may be empty).
+    mode='full'    -> missing-id detection + per-column value differences.
+
+    Returns (missing_in_db1, missing_in_db2, differing_records) where each
+    differing record is a long-format dict:
+        {id, column, value_<db1>, value_<db2>}.
+    """
+    first_df.columns = ['id'] + list(value_columns)
+    second_df.columns = ['id'] + list(value_columns)
+    first_df['id'] = first_df['id'].astype(str)
+    second_df['id'] = second_df['id'].astype(str)
+
+    s1 = set(first_df['id'])
+    s2 = set(second_df['id'])
+    missing_in_db2 = list(s1 - s2)   # in db1 but not db2
+    missing_in_db1 = list(s2 - s1)   # in db2 but not db1
+
+    if mode == 'missing' or not value_columns:
+        return missing_in_db1, missing_in_db2, []
+
+    f = first_df.drop_duplicates('id', keep='last')
+    s = second_df.drop_duplicates('id', keep='last')
+    merged = pd.merge(f, s, on='id', how='inner', suffixes=('__s', '__t'))
+    if merged.empty:
+        return missing_in_db1, missing_in_db2, []
+
+    val1 = f'value_{database1}'
+    val2 = f'value_{database2}'
+    records = []
+    for col in value_columns:
+        a = merged[f'{col}__s']
+        b = merged[f'{col}__t']
+        mask = _column_diff_mask(a, b, threshold)
+        if mask.any():
+            sub = merged.loc[mask, ['id', f'{col}__s', f'{col}__t']]
+            part = pd.DataFrame({
+                'id': sub['id'].values,
+                'column': col,
+                val1: sub[f'{col}__s'].values,
+                val2: sub[f'{col}__t'].values,
+            })
+            records.extend(part.to_dict('records'))
+    return missing_in_db1, missing_in_db2, records
+
+
 def main(config):
     # Reuse credentials already loaded by config.py if present, otherwise
     # load each database's credential file from the creds/ directory.
@@ -978,9 +1072,30 @@ def main(config):
         id_col = composite_columns[0]
         chunk_size = int(config.get('id_chunk_size', 2000000))
         use_final = str(config.get('clickhouse_final', 'yes')).lower() in ('yes', 'true')
-        check_column = config['check_column']
         table1_name = config[f'{database1}_table_name']
         table2_name = config[f'{database2}_table_name']
+
+        # Validation mode: 'missing' (ids only) or 'full' (ids + value diffs).
+        mode = str(config.get('mode', 'full')).lower()
+        if mode not in ('missing', 'full'):
+            mode = 'full'
+
+        # In full mode, compare every column common to both tables (minus the id
+        # and ClickHouse/dlt meta columns) unless an explicit check_column is set.
+        if mode == 'full':
+            explicit = config.get('check_column')
+            if explicit:
+                value_columns = [explicit]
+            else:
+                value_columns = detect_value_columns(
+                    fetch_data, database1, table1_name, database2, table2_name, id_col,
+                    extra_excludes=config.get('exclude_columns'))
+        else:
+            value_columns = []
+
+        scope = "missing-id only" if mode == 'missing' else f"{len(value_columns)} columns: {value_columns}"
+        head0 = f"Validation mode: {mode} ({scope})"
+        logging.info(head0); print(head0)
 
         # Determine the global id range across both databases.
         mm1 = fetch_data(database1, build_minmax_query(database1, id_col, table1_name, use_final))
@@ -997,14 +1112,14 @@ def main(config):
         for lo in range(gmin, gmax + 1, chunk_size):
             hi = lo + chunk_size - 1
             chunk_idx += 1
-            q1 = build_range_query(database1, id_col, check_column, table1_name, lo, hi, use_final)
-            q2 = build_range_query(database2, id_col, check_column, table2_name, lo, hi, use_final)
+            q1 = build_range_query_multi(database1, id_col, value_columns, table1_name, lo, hi, use_final)
+            q2 = build_range_query_multi(database2, id_col, value_columns, table2_name, lo, hi, use_final)
             with ThreadPoolExecutor() as ex:
                 fu1 = ex.submit(fetch_data, database1, q1)
                 fu2 = ex.submit(fetch_data, database2, q2)
                 d1 = fu1.result()
                 d2 = fu2.result()
-            m1, m2, recs = compare_chunk(d1, d2, check_column, data_type, threshold, database1, database2)
+            m1, m2, recs = compare_chunk_multi(d1, d2, value_columns, mode, threshold, database1, database2)
             all_missing_db1.extend(m1)
             all_missing_db2.extend(m2)
             all_diffs.extend(recs)
@@ -1015,10 +1130,12 @@ def main(config):
                    f"missing_{database2}={len(all_missing_db2)} diff={len(all_diffs)}")
             logging.info(msg); print(msg)
 
-        # Write outputs (same shape/naming as the non-chunked path).
+        # Write outputs. The output name tag reflects the comparison scope.
+        scope_tag = 'missing' if mode == 'missing' else (
+            _safe(value_columns[0]) if len(value_columns) == 1 else 'allcolumns')
         output_filename_base = (
             f"output_{database1}_{_safe(table1_name)}_vs_{database2}_{_safe(table2_name)}_"
-            f"{_safe(check_column)}_{timestamp}_result.csv"
+            f"{scope_tag}_{mode}_{timestamp}_result.csv"
         )
         output_csv_name = os.path.join(output_summary_subdirectory, output_filename_base)
 
@@ -1032,13 +1149,14 @@ def main(config):
         })
         validation_df.to_csv(output_csv_name, index=False)
 
+        # Detail file: long format (id, column, value_<db1>, value_<db2>).
         detail_name = (f"{output_csv_name[:-4] if output_csv_name.endswith('.csv') else output_csv_name}"
                        f"_differing_values.csv")
-        detail_cols = ['id', f'{check_column}_{database1}', f'{check_column}_{database2}']
+        detail_cols = ['id', 'column', f'value_{database1}', f'value_{database2}']
         detail_df = pd.DataFrame(all_diffs) if all_diffs else pd.DataFrame(columns=detail_cols)
         detail_df.to_csv(detail_name, index=False)
 
-        done = (f"✅ Chunked validation done. missing_in_{database1}={len(all_missing_db1)}, "
+        done = (f"✅ Chunked validation done [mode={mode}]. missing_in_{database1}={len(all_missing_db1)}, "
                 f"missing_in_{database2}={len(all_missing_db2)}, differing_values={len(all_diffs)}")
         logging.info(done); print(done)
         logging.info(f"Validation results saved to {output_csv_name}.")
@@ -1112,9 +1230,24 @@ def main(config):
 if __name__ == "__main__":
     import sys
 
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    # Args: python running_validation.py [config.yaml] [--mode missing|full]
+    config_path = "config.yaml"
+    cli_mode = None
+    _args = sys.argv[1:]
+    _i = 0
+    while _i < len(_args):
+        a = _args[_i]
+        if a == '--mode' and _i + 1 < len(_args):
+            cli_mode = _args[_i + 1].lower(); _i += 2
+        elif a.startswith('--mode='):
+            cli_mode = a.split('=', 1)[1].lower(); _i += 1
+        else:
+            config_path = a; _i += 1
+
     with open(config_path, 'r') as f:
         cfg = yaml.safe_load(f)
+    if cli_mode is not None:
+        cfg['mode'] = cli_mode
     main(cfg)
 
 
