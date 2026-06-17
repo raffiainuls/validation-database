@@ -36,7 +36,6 @@ def fetch_data_postgres(query, host, port, database, user, password, batch_size=
     logging.info(f"port: {port}")
     logging.info(f"database: {database}")
     logging.info(f"username: {user}")
-    logging.info(f"password: {password}")
     logging.info(f"Execute with query: ")
     logging.info(f"{query}")
     try:
@@ -84,7 +83,6 @@ def fetch_data_oracle(query, dsn, user, password, batch_size):
      logging.info("Try to connect database oracle....")
      logging.info(f"dsn: {dsn}")
      logging.info(f"username: {user}")
-     logging.info(f"password: {password}")
      logging.info(f"batch_size: {batch_size}")
      logging.info("execute with query:  ")
      logging.info(f"{query}")
@@ -122,14 +120,12 @@ def fetch_data_oracle(query, dsn, user, password, batch_size):
           logging.error(f"Error fetching data from Oracle: {str(e)}")
           raise
 
-def fetch_data_aws(query, database, output_location, region_name, aws_access_key_id, aws_secret_access_key):
+def fetch_data_aws(query, database, output_location, region_name, aws_access_key_id, aws_secret_access_key, batch_size=None):
     print("Try to connect AWS Athnea.......")
     logging.info("Try to connect AWS Athena....")
     logging.info(f"Database: {database}")
     logging.info(f"output_location: {output_location}")
     logging.info(f"region_name: {region_name}")
-    logging.info(f"aws_access_key_id: {aws_access_key_id}")
-    logging.info(f"aws_secret_access_key: {aws_secret_access_key}")
     logging.info("Execute Using Query:  ")
     logging.info(f"{query}")
 
@@ -142,7 +138,7 @@ def fetch_data_aws(query, database, output_location, region_name, aws_access_key
     logging.info("Starting AWS Athena query execution.....")
     print("Starting AWS Athena query execution......")
 
-    response = client.stat_query_execution(
+    response = client.start_query_execution(
         QueryString= query,
         QueryExecutionContext={'Database':database},
         ResultConfiguration={'OutputLocation': output_location}
@@ -181,11 +177,9 @@ def fetch_data_aws(query, database, output_location, region_name, aws_access_key
     print(f"Fineshed fetching AWS data. Total rows fetched: {len(data)}.")
     return pd.DataFrame(data, columns=headers)
 
-def fetch_data_alicloud(query, access_id, access_key, project_name, endpoint, batch_size):
+def fetch_data_alicloud(query, access_id, access_key, project_name, endpoint, batch_size=1000000):
     print("Try to connect Alibaba Max Compute....")
     logging.info("Try to connect Alibaba Max Compute.....")
-    logging.info(f"AccessID: {access_id}")
-    logging.info(f"AccessKey: {access_key}")
     logging.info(f"Project Name: {project_name}")
     logging.info(f"Endpoint: {endpoint}")
     logging.info(f"Batch Size: {batch_size}")
@@ -220,82 +214,67 @@ def fetch_data_clickhouse(query, host, port, database, user, password, batch_siz
     logging.info(f"port: {port}")
     logging.info(f"database: {database}")
     logging.info(f"user: {user}")
-    logging.info(f"password: {password}")
     logging.info(f"batch_size: {batch_size}")
     logging.info("Execute Using Query: ")
     logging.info(f"{query}")
-    
+
     try:
-        # Create connection to ClickHouse
+        # Create connection to ClickHouse. A long send/receive timeout keeps the
+        # streaming request alive while the server produces large result sets.
         client = clickhouse_connect.get_client(
             host=host,
             port=port,
             database=database,
             username=user,
-            password=password
+            password=password,
+            connect_timeout=30,
+            send_receive_timeout=3600
         )
         logging.info("Connected to ClickHouse database")
         print("Connected to ClickHouse database")
 
-        # Execute query and fetch results in batches
-        logging.info("Executing query on ClickHouse....")
-        
-        # First, get the total count to implement batching
-        count_query = f"SELECT COUNT(*) as total FROM ({query}) as subquery"
-        count_result = client.query(count_query)
-        total_rows = count_result.result_rows[0][0]
-        
-        logging.info(f"ClickHouse query succeeded. Total rows to fetch: {total_rows}.")
-        print(f"ClickHouse query succeeded. Total rows to fetch: {total_rows}.")
-        
+        # Stream the result of the query in native blocks using a single request.
+        # This avoids LIMIT/OFFSET pagination (which is O(n^2) on ClickHouse and
+        # times out on large tables) and never issues a separate COUNT query.
+        logging.info("Executing streaming query on ClickHouse....")
+        print("Executing streaming query on ClickHouse....")
+
         all_data = []
-        offset = 0
         batch_counter = 1
-        
-        while offset < total_rows:
-            # Fetch data in batches using LIMIT and OFFSET
-            batch_query = f"{query} LIMIT {batch_size} OFFSET {offset}"
-            batch_result = client.query(batch_query)
-            
-            # Convert to pandas DataFrame using the correct method
-            try:
-                batch_df = batch_result.df()
-            except AttributeError:
-                # Fallback for older versions of clickhouse_connect
-                batch_df = pd.DataFrame(batch_result.result_rows, columns=batch_result.column_names)
-            
-            if batch_df.empty:
-                break
-                
-            all_data.append(batch_df)
-            logging.info(f"Fetched Batch {batch_counter}, rows so far: {len(pd.concat(all_data, ignore_index=True))}.")
-            print(f"Fetched Batch {batch_counter}, rows so far: {len(pd.concat(all_data, ignore_index=True))}.")
-            batch_counter += 1
-            offset += batch_size
-        
-        # Combine all batches
+        rows_so_far = 0
+
+        with client.query_df_stream(query) as stream:
+            for batch_df in stream:
+                if batch_df.empty:
+                    continue
+                all_data.append(batch_df)
+                rows_so_far += len(batch_df)
+                logging.info(f"Fetched Batch Clickhouse {batch_counter}, rows so far: {rows_so_far}.")
+                print(f"Fetched Batch Clickhouse {batch_counter}, rows so far: {rows_so_far}.")
+                batch_counter += 1
+
+        # Combine all streamed blocks
         final_df = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
         logging.info(f"Finished fetching ClickHouse data. Total rows fetched: {len(final_df)}.")
         print(f"Finished fetching ClickHouse data. Total rows fetched: {len(final_df)}.")
-        
+
         return final_df
-     
+
     except Exception as e:
         logging.error(f"Error fetching data from ClickHouse: {str(e)}")
         raise
 
-def fetch_data_mysql(query, host, port, database, user, password, batch_size=1000):
+def fetch_data_mysql(query, host, port, database, user, password, batch_size=10000000):
     print("Try to connect MySQL database....")
     logging.info("Try to connect MySQL database....")
     logging.info(f"host: {host}")
     logging.info(f"port: {port}")
     logging.info(f"database: {database}")
     logging.info(f"user: {user}")
-    logging.info(f"password: {password}")
     logging.info(f"batch_size: {batch_size}")
     logging.info("Execute Using Query: ")
     logging.info(f"{query}")
-    
+
     try:
         # Create connection to MySQL
         conn = mysql.connector.connect(
@@ -325,8 +304,8 @@ def fetch_data_mysql(query, host, port, database, user, password, batch_size=100
             if not data:
                 break
             all_data.extend(data)
-            logging.info(f"Fetched Batch {batch_counter}, rows so far: {len(all_data)}.")
-            print(f"Fetched Batch {batch_counter}, rows so far: {len(all_data)}.")
+            logging.info(f"Fetched Batch Mysql {batch_counter}, rows so far: {len(all_data)}.")
+            print(f"Fetched Batch Mysql {batch_counter}, rows so far: {len(all_data)}.")
             batch_counter += 1
         
         # Close connection
@@ -383,29 +362,39 @@ def validate_data_integer(first_df, second_df, check_column, output_filename, id
     # Find missing IDs in first database (those in second but not in first)
     missing_in_database1 = list(second_ids_set - first_ids_set)
     
-    # Find differing values for common IDs
+    # Find differing values for common IDs.
+    # Vectorized with a pandas merge instead of a per-id Python loop, which is
+    # orders of magnitude faster on large tables (tens of millions of rows).
     if len(common_ids) > 0:
-        # Get data for common IDs
-        first_common = first_df[first_df[id_column].astype(str).isin(common_ids)]
-        second_common = second_df[second_df[id_column].astype(str).isin(common_ids)]
-        
-        # Create lookup dictionaries
-        first_dict = dict(zip(first_common[id_column].astype(str), first_common[check_column]))
-        second_dict = dict(zip(second_common[id_column].astype(str), second_common[check_column]))
-        
-        # Check for differing values
-        for id_val in common_ids:
-            first_val = first_dict.get(id_val)
-            second_val = second_dict.get(id_val)
-            
-            if pd.notna(first_val) and pd.notna(second_val):
-                if first_val != second_val:
-                    differing_values_list.append({
-                        f'{id_column}_{database1}': id_val,
-                        f'{check_column}_{database1}': first_val,
-                        f'{id_column}_{database2}': id_val,
-                        f'{check_column}_{database2}': second_val
-                    })
+        col1 = f'{check_column}_{database1}'
+        col2 = f'{check_column}_{database2}'
+
+        # Normalized string id as the join key (matches the set logic above).
+        # drop_duplicates(keep='last') mirrors dict(zip(...)) last-wins semantics.
+        first_norm = first_df[[id_column, check_column]].copy()
+        second_norm = second_df[[id_column, check_column]].copy()
+        first_norm['_idstr'] = first_norm[id_column].astype(str)
+        second_norm['_idstr'] = second_norm[id_column].astype(str)
+        first_norm = first_norm.drop_duplicates('_idstr', keep='last')
+        second_norm = second_norm.drop_duplicates('_idstr', keep='last')
+
+        merged = pd.merge(
+            first_norm[['_idstr', check_column]].rename(columns={check_column: col1}),
+            second_norm[['_idstr', check_column]].rename(columns={check_column: col2}),
+            on='_idstr', how='inner'
+        )
+
+        # Both values present and not equal.
+        diff_mask = merged[col1].notna() & merged[col2].notna() & (merged[col1] != merged[col2])
+        diff = merged.loc[diff_mask]
+
+        if not diff.empty:
+            differing_values_list = pd.DataFrame({
+                f'{id_column}_{database1}': diff['_idstr'].values,
+                col1: diff[col1].values,
+                f'{id_column}_{database2}': diff['_idstr'].values,
+                col2: diff[col2].values,
+            }).to_dict('records')
 
     print(f"Found {len(missing_in_database1)} IDs missing in {database1}")
     print(f"Found {len(missing_in_database2)} IDs missing in {database2}")
@@ -417,10 +406,15 @@ def validate_data_integer(first_df, second_df, check_column, output_filename, id
     print("Processing Validate Missing Ids Done.")
     logging.info("Processing Validate Missing Ids Done.")
 
+    # Keep an unpadded copy of the real differing records for the detail CSV,
+    # so the None-padding below (needed only to align summary columns) does not
+    # leak into the detail output.
+    differing_values_records = list(differing_values_list)
+
     # menyesuaikan panjang with None or Nan
     max_len = max(len(missing_in_database1), len(missing_in_database2), len(differing_values_list))
 
-    #ensure all list have same length 
+    #ensure all list have same length
     missing_in_database1.extend([None] * (max_len - len(missing_in_database1)))
     missing_in_database2.extend([None] * (max_len - len(missing_in_database2)))
     differing_values_list.extend([None] * (max_len - len(differing_values_list)))
@@ -443,12 +437,18 @@ def validate_data_integer(first_df, second_df, check_column, output_filename, id
     print(f"Validation result saved to ... {output_filename}.")
     
 
-    outputfile_id_differing_values = f"{output_filename}_differing_values.csv"
+    outputfile_id_differing_values = f"{output_filename[:-4] if output_filename.endswith('.csv') else output_filename}_differing_values.csv"
 
-    # Create a CSV for differing values (ID and check_column only)
-    if differing_values_list:
-        differing_values_df = pd.DataFrame(differing_values_list)
-        differing_values_df.to_csv(outputfile_id_differing_values, index=False)
+    # Always create a CSV for differing values (ID and check_column only),
+    # writing just the header row when there are no differences.
+    if differing_values_records:
+        differing_values_df = pd.DataFrame(differing_values_records)
+    else:
+        differing_values_df = pd.DataFrame(columns=[
+            f'{id_column}_{database1}', f'{check_column}_{database1}',
+            f'{id_column}_{database2}', f'{check_column}_{database2}'
+        ])
+    differing_values_df.to_csv(outputfile_id_differing_values, index=False)
     logging.info(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
     print(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
 
@@ -533,13 +533,17 @@ def validate_data_string(first_df, second_df, check_column, output_filename, id_
         print("saving result to csv file ........")
         logging.info("saving result to csv file ........")
 
-        outputfile_id_differing_values = f"{output_filename}_differing_values.csv"
+        outputfile_id_differing_values = f"{output_filename[:-4] if output_filename.endswith('.csv') else output_filename}_differing_values.csv"
 
         validation_df.to_csv(output_filename, index=False)
         logging.info(f"Validation results saved to {output_filename}.")
+        # Always write the differing-values detail file (header-only if none).
+        detail_columns = [id_column, f'{check_column}_{database1}', f'{check_column}_{database2}']
         if not differing_values.empty:
-            differing_values_csv = differing_values[[id_column, f'{check_column}_{database1}', f'{check_column}_{database2}']]
-            differing_values_csv.to_csv(outputfile_id_differing_values, index=False)
+            differing_values_csv = differing_values[detail_columns]
+        else:
+            differing_values_csv = pd.DataFrame(columns=detail_columns)
+        differing_values_csv.to_csv(outputfile_id_differing_values, index=False)
         logging.info(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
         print(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
 
@@ -601,43 +605,104 @@ def validate_data_date(first_df, second_df, check_column, output_filename, id_co
         validation_df.to_csv(output_filename, index=False)
         logging.info(f"Validation results saved to {output_filename}.")
 
-        outputfile_id_differing_values = f"{output_filename}_differing_values.csv"
+        outputfile_id_differing_values = f"{output_filename[:-4] if output_filename.endswith('.csv') else output_filename}_differing_values.csv"
 
-            # Create a CSV for differing values (ID and check_column only)
+        # Always write the differing-values detail file (header-only if none).
+        detail_columns = [id_column, f'{check_column}_{database1}', f'{check_column}_{database2}']
         if not differing_values.empty:
-            differing_values_csv = differing_values[[id_column, f'{check_column}_{database1}', f'{check_column}_{database2}']]
-            differing_values_csv.to_csv(outputfile_id_differing_values, index=False)
+            differing_values_csv = differing_values[detail_columns]
+        else:
+            differing_values_csv = pd.DataFrame(columns=detail_columns)
+        differing_values_csv.to_csv(outputfile_id_differing_values, index=False)
         logging.info(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
         print(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
 
     
+def build_minmax_query(database, id_column, table_name, use_final=False):
+    """MIN/MAX of the numeric id column, used to derive chunk boundaries."""
+    final = " FINAL" if (database == 'clickhouse' and use_final) else ""
+    if database == 'postgres':
+        return f'SELECT MIN("{id_column}") AS lo, MAX("{id_column}") AS hi FROM {table_name}'
+    return f"SELECT MIN({id_column}) AS lo, MAX({id_column}) AS hi FROM {table_name}{final}"
+
+
+def build_range_query(database, id_column, check_column, table_name, lo, hi, use_final=False):
+    """Fetch (id, check_column) for a single id range [lo, hi]. Chunking by id
+    keeps memory bounded and is period-agnostic: an id falls in the same range
+    on both sides regardless of its created_at, so missing-id detection stays
+    correct across all periods."""
+    final = " FINAL" if (database == 'clickhouse' and use_final) else ""
+    if database == 'postgres':
+        return (f'SELECT "{id_column}" AS id, "{check_column}" '
+                f'FROM {table_name} WHERE "{id_column}" BETWEEN {lo} AND {hi}')
+    return (f"SELECT {id_column} AS id, {check_column} "
+            f"FROM {table_name}{final} WHERE {id_column} BETWEEN {lo} AND {hi}")
+
+
+def compare_chunk(first_df, second_df, check_column, data_type, threshold, database1, database2):
+    """Compare one id-range chunk. Returns (missing_in_db1, missing_in_db2,
+    differing_records) where differing_records are dicts: id, <col>_<db1>, <col>_<db2>."""
+    # The range queries always select exactly two columns aliased (id, check_column).
+    first_df.columns = ['id', check_column]
+    second_df.columns = ['id', check_column]
+
+    first_df['id'] = first_df['id'].astype(str)
+    second_df['id'] = second_df['id'].astype(str)
+
+    s1 = set(first_df['id'])
+    s2 = set(second_df['id'])
+    missing_in_db2 = list(s1 - s2)   # in first (db1) but not second (db2)
+    missing_in_db1 = list(s2 - s1)   # in second (db2) but not first (db1)
+
+    col1 = f'{check_column}_{database1}'
+    col2 = f'{check_column}_{database2}'
+    f = first_df.drop_duplicates('id', keep='last').rename(columns={check_column: col1})
+    s = second_df.drop_duplicates('id', keep='last').rename(columns={check_column: col2})
+    merged = pd.merge(f, s, on='id', how='inner')
+
+    if merged.empty:
+        return missing_in_db1, missing_in_db2, []
+
+    dt = data_type.lower()
+    if dt == 'integer':
+        merged[col1] = pd.to_numeric(merged[col1], errors='coerce')
+        merged[col2] = pd.to_numeric(merged[col2], errors='coerce')
+        mask = merged[col1].notna() & merged[col2].notna() & (merged[col1] != merged[col2])
+    elif dt == 'date':
+        merged[col1] = pd.to_datetime(merged[col1], errors='coerce')
+        merged[col2] = pd.to_datetime(merged[col2], errors='coerce')
+        mask = (merged[col1] != merged[col2]) & ~(merged[col1].isna() & merged[col2].isna())
+    elif dt == 'string':
+        mask = ~merged.apply(lambda r: fuzzy_match(r[col1], r[col2], threshold), axis=1)
+    else:
+        mask = merged[col1] != merged[col2]
+
+    diff = merged.loc[mask]
+    records = []
+    if not diff.empty:
+        records = pd.DataFrame({
+            'id': diff['id'].values,
+            col1: diff[col1].values,
+            col2: diff[col2].values,
+        }).to_dict('records')
+    return missing_in_db1, missing_in_db2, records
+
+
 def main(config):
-    # Load credentials from separate files
-    credentials = {}
-    
-    # Load MySQL credentials
-    try:
-        with open('creds/mysql.json', 'r') as f:
-            credentials['mysql'] = yaml.safe_load(f)
-    except FileNotFoundError:
-        print("MySQL credentials file not found")
-    
-    # Load ClickHouse credentials  
-    try:
-        with open('creds/clickhouse.json', 'r') as f:
-            credentials['clickhouse'] = yaml.safe_load(f)
-    except FileNotFoundError:
-        print("ClickHouse credentials file not found")
-    
-    # Load other credentials if they exist
-    for db in ['postgres', 'oracle', 'aws', 'ali']:
+    # Reuse credentials already loaded by config.py if present, otherwise
+    # load each database's credential file from the creds/ directory.
+    credentials = dict(config.get('credentials') or {})
+
+    for db in ['mysql', 'clickhouse', 'postgres', 'oracle', 'aws', 'ali']:
+        if db in credentials:
+            continue
         try:
             with open(f'creds/{db}.json', 'r') as f:
                 credentials[db] = yaml.safe_load(f)
         except FileNotFoundError:
             pass
     databases_to_check = config.get('databases', [])
-    batch_size = config.get('batch_size', 1000)
+    batch_size = config.get('batch_size', 50000)  # Increase default batch size for large datasets
     output_directory = config.get('output_directory', './output')
     os.makedirs(output_directory, exist_ok=True)
     data_type = config.get('data_type')
@@ -840,19 +905,19 @@ def main(config):
         fetch_functions = {
             'aws': lambda: fetch_data_aws(
                 query,
-                credentials.get('aws_database'),
-                credentials.get('output_location'),
-                credentials.get('aws_region'),
-                credentials.get('aws_access_key_id'),
-                credentials.get('aws_secret_access_key'),
+                credentials['aws']['aws_database'],
+                credentials['aws']['output_location'],
+                credentials['aws']['aws_region'],
+                credentials['aws']['aws_access_key_id'],
+                credentials['aws']['aws_secret_access_key'],
                 batch_size
             ),
             'ali': lambda: fetch_data_alicloud(
                 query,
-                credentials.get('ali_access_id'),
-                credentials.get('ali_access_key'),
-                credentials.get('ali_project_name'),
-                credentials.get('ali_endpoint'),
+                credentials['ali']['ali_access_id'],
+                credentials['ali']['ali_access_key'],
+                credentials['ali']['ali_project_name'],
+                credentials['ali']['ali_endpoint'],
                 batch_size
             ),
             'postgres': lambda: fetch_data_postgres(
@@ -901,6 +966,87 @@ def main(config):
         raise ValueError("Config must define exactly two databases to check.")
     
     database1, database2 = databases_to_check
+
+    def _safe(value):
+        return "".join(c if c.isalnum() else "_" for c in str(value))
+
+    # ---- Chunked-by-id validation path (memory-safe, period-agnostic) ----
+    # Processes the full tables in id ranges so memory stays bounded, while
+    # missing-id detection remains correct across ALL periods (an id lands in
+    # the same range on both sides regardless of its created_at).
+    if str(config.get('chunk_by_id', 'no')).lower() in ('yes', 'true'):
+        id_col = composite_columns[0]
+        chunk_size = int(config.get('id_chunk_size', 2000000))
+        use_final = str(config.get('clickhouse_final', 'yes')).lower() in ('yes', 'true')
+        check_column = config['check_column']
+        table1_name = config[f'{database1}_table_name']
+        table2_name = config[f'{database2}_table_name']
+
+        # Determine the global id range across both databases.
+        mm1 = fetch_data(database1, build_minmax_query(database1, id_col, table1_name, use_final))
+        mm2 = fetch_data(database2, build_minmax_query(database2, id_col, table2_name, use_final))
+        gmin = int(min(mm1.iloc[0, 0], mm2.iloc[0, 0]))
+        gmax = int(max(mm1.iloc[0, 1], mm2.iloc[0, 1]))
+        total_chunks = (gmax - gmin) // chunk_size + 1
+        head = (f"Chunked validation: id range [{gmin}, {gmax}], "
+                f"chunk_size={chunk_size}, total_chunks={total_chunks}")
+        logging.info(head); print(head)
+
+        all_missing_db1, all_missing_db2, all_diffs = [], [], []
+        chunk_idx = 0
+        for lo in range(gmin, gmax + 1, chunk_size):
+            hi = lo + chunk_size - 1
+            chunk_idx += 1
+            q1 = build_range_query(database1, id_col, check_column, table1_name, lo, hi, use_final)
+            q2 = build_range_query(database2, id_col, check_column, table2_name, lo, hi, use_final)
+            with ThreadPoolExecutor() as ex:
+                fu1 = ex.submit(fetch_data, database1, q1)
+                fu2 = ex.submit(fetch_data, database2, q2)
+                d1 = fu1.result()
+                d2 = fu2.result()
+            m1, m2, recs = compare_chunk(d1, d2, check_column, data_type, threshold, database1, database2)
+            all_missing_db1.extend(m1)
+            all_missing_db2.extend(m2)
+            all_diffs.extend(recs)
+            msg = (f"[checkpoint] chunk {chunk_idx}/{total_chunks} id[{lo}-{hi}] "
+                   f"rows {database1}={len(d1)} {database2}={len(d2)} | "
+                   f"this chunk: missing_{database1}+={len(m1)} missing_{database2}+={len(m2)} diff+={len(recs)} | "
+                   f"running totals: missing_{database1}={len(all_missing_db1)} "
+                   f"missing_{database2}={len(all_missing_db2)} diff={len(all_diffs)}")
+            logging.info(msg); print(msg)
+
+        # Write outputs (same shape/naming as the non-chunked path).
+        output_filename_base = (
+            f"output_{database1}_{_safe(table1_name)}_vs_{database2}_{_safe(table2_name)}_"
+            f"{_safe(check_column)}_{timestamp}_result.csv"
+        )
+        output_csv_name = os.path.join(output_summary_subdirectory, output_filename_base)
+
+        max_len = max(len(all_missing_db1), len(all_missing_db2), len(all_diffs), 0)
+        def _pad(lst):
+            return list(lst) + [None] * (max_len - len(lst))
+        validation_df = pd.DataFrame({
+            f'missing_in_{database1}': _pad(all_missing_db1),
+            f'missing_in_{database2}': _pad(all_missing_db2),
+            'differing_values': _pad(all_diffs),
+        })
+        validation_df.to_csv(output_csv_name, index=False)
+
+        detail_name = (f"{output_csv_name[:-4] if output_csv_name.endswith('.csv') else output_csv_name}"
+                       f"_differing_values.csv")
+        detail_cols = ['id', f'{check_column}_{database1}', f'{check_column}_{database2}']
+        detail_df = pd.DataFrame(all_diffs) if all_diffs else pd.DataFrame(columns=detail_cols)
+        detail_df.to_csv(detail_name, index=False)
+
+        done = (f"✅ Chunked validation done. missing_in_{database1}={len(all_missing_db1)}, "
+                f"missing_in_{database2}={len(all_missing_db2)}, differing_values={len(all_diffs)}")
+        logging.info(done); print(done)
+        logging.info(f"Validation results saved to {output_csv_name}.")
+        print(f"Validation result saved to ... {output_csv_name}.")
+        logging.info(f"Id Differing Values csv file save into {detail_name}")
+        print(f"Id Differing Values csv file save into {detail_name}")
+        return
+
     query1 = construct_query(database1, config[f'{database1}_table_name'], config.get(f'{database1}_database_date_column'))
     query2 = construct_query(database2, config[f'{database2}_table_name'], config.get(f'{database2}_database_date_column'))
 
@@ -937,7 +1083,16 @@ def main(config):
     first_df = first_df.sort_values(by=['id'], ascending=True)
     second_df = second_df.sort_values(by=['id'], ascending=True)
     
-    output_csv_name = os.path.join(output_summary_subdirectory, f"output_{database1}_{database2}_{config['check_column']}_result.csv")
+    # Build a descriptive, timestamped output name:
+    # output_<db1>_<table1>_vs_<db2>_<table2>_<column>_<timestamp>_result.csv
+    table1 = _safe(config.get(f'{database1}_table_name') or database1)
+    table2 = _safe(config.get(f'{database2}_table_name') or database2)
+    check_col = _safe(config['check_column'])
+    output_filename_base = (
+        f"output_{database1}_{table1}_vs_{database2}_{table2}_"
+        f"{check_col}_{timestamp}_result.csv"
+    )
+    output_csv_name = os.path.join(output_summary_subdirectory, output_filename_base)
     print(f"Comparison result saved to: {output_csv_name}")
       
 
@@ -955,7 +1110,12 @@ def main(config):
 
 
 if __name__ == "__main__":
-     main()
+    import sys
+
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    with open(config_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    main(cfg)
 
 
 
