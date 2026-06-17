@@ -5,9 +5,10 @@ This repository provides a comprehensive data validation tool designed to ensure
 ## Project Overview
 
 This validation tool is designed to:
-- Validate and identify missing IDs between different database systems (AWS, Alibaba, Postgres, Oracle)
+- Validate and identify missing IDs between different database systems (AWS Athena, Alibaba MaxCompute, PostgreSQL, Oracle, MySQL, ClickHouse)
 - Detect discrepancies in values based on unique IDs or composite IDs
 - Support multiple data types (integer, string, date) with appropriate validation logic
+- Scale to very large tables (tens of millions of rows) via memory-safe chunked-by-id processing
 - Provide detailed reporting of validation results
 
 ## Features
@@ -21,6 +22,10 @@ This validation tool is designed to:
 - **Composite ID Support**: Handles tables with composite primary keys (multiple columns forming a unique identifier)
 - **Batch Processing**: Efficiently processes large datasets using configurable batch sizes
 - **Concurrent Processing**: Uses multi-threading for parallel data fetching from different databases
+- **Chunked-by-ID Validation**: For very large tables (tens of millions of rows), processes the data in bounded id ranges so memory stays low — while keeping missing-ID detection correct across **all periods** (see [Chunked Validation for Large Tables](#chunked-validation-for-large-tables))
+- **Streaming ClickHouse Fetch**: Reads ClickHouse results as a single streamed query (no `LIMIT/OFFSET` pagination), avoiding the O(n²) slowdown and read-timeouts on large tables
+- **Checkpoint Logging**: Each chunk writes a progress checkpoint to the run log file, so you can monitor long runs live with `tail -f`
+- **Timestamped, Self-Describing Output**: Result file names embed both table names, the checked column, and a timestamp, so runs never overwrite each other
 
 ## System Requirements
 
@@ -65,7 +70,7 @@ Before you begin, ensure you have the following:
    ```bash
    uv venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   uv pip install pandas boto3 pyodps psycopg2-binary cx_Oracle clickhouse-connect PyYAML
+   uv pip install pandas boto3 pyodps psycopg2-binary cx_Oracle clickhouse-connect mysql-connector-python PyYAML
    ```
 
 #### Option 2: Using pip (Traditional)
@@ -77,7 +82,7 @@ Before you begin, ensure you have the following:
 
 2. **Install Python dependencies:**
    ```bash
-   pip install pandas boto3 pyodps psycopg2-binary cx_Oracle clickhouse-connect PyYAML
+   pip install pandas boto3 pyodps psycopg2-binary cx_Oracle clickhouse-connect mysql-connector-python PyYAML
    ```
 
 3. **Install Oracle Client** (for Oracle database support):
@@ -88,25 +93,31 @@ Before you begin, ensure you have the following:
 
 ```
 validation-database/
-├── readme.md              # This documentation file
-├── config.py             # Configuration loader and credential manager
-├── running_validation.py # Main validation logic and data processing
-├── validation.ipynb      # Jupyter notebook for running validations
-├── config.yaml           # Main configuration file
-├── docs.md              # Additional documentation
-├── creds/               # Directory for database credentials
-│   ├── aws.json         # AWS credentials
-│   ├── oracle.json      # Oracle credentials
-│   ├── postgres.json    # PostgreSQL credentials
-│   └── alibaba.json     # Alibaba credentials (ali.json)
-├── output/              # Directory for validation results
-│   └── result/          # CSV output files
-└── logs/                # Log files directory
+├── readme.md                 # This documentation file
+├── config.py                 # Configuration loader and credential manager
+├── running_validation.py     # Main validation logic and data processing
+├── validation.ipynb          # Jupyter notebook for running validations
+├── config.yaml               # Main configuration file
+├── config_ws_transactions.yaml # Example chunked-by-id config for a large table
+├── docs.md                   # Additional documentation
+├── .gitignore                # Excludes creds/, .env*, logs/, output/ from git
+├── creds/                    # Database credentials (gitignored — not committed)
+│   ├── mysql.json            # MySQL credentials
+│   ├── clickhouse.json       # ClickHouse credentials
+│   ├── aws.json              # AWS credentials
+│   ├── oracle.json           # Oracle credentials
+│   ├── postgres.json         # PostgreSQL credentials
+│   └── ali.json              # Alibaba MaxCompute credentials
+├── output/                   # Directory for validation results
+│   └── result/               # CSV output files
+└── logs/                     # Log files directory (one timestamped log per run)
 ```
 
 ## Configuration Guide
 
 ### 1. Database Credentials Setup
+
+> **Security:** the `creds/` directory and `.env*` files are listed in `.gitignore` and are **not** tracked by git. Never commit real credentials. Connection details (host, port, db, user) are logged for traceability, but **passwords and cloud access keys are never written to the logs**.
 
 Create JSON files in the `creds/` directory for each database you plan to use:
 
@@ -168,8 +179,8 @@ Configure the validation parameters in `config.yaml`:
 
 ```yaml
 # Basic Configuration
-database1: postgres          # First database to compare (postgres, oracle, aws, ali, clickhouse)
-database2: oracle           # Second database to compare (postgres, oracle, aws, ali, clickhouse)
+database1: postgres          # First database to compare (postgres, oracle, aws, ali, mysql, clickhouse)
+database2: oracle           # Second database to compare (postgres, oracle, aws, ali, mysql, clickhouse)
 databases: ["oracle", "postgres"]  # List of databases to validate
 data_type: string           # Data type: integer, string, or date
 is_using_manual_queries: no # Use manual queries or auto-generate (yes/no)
@@ -179,6 +190,14 @@ threshold: 1              # Fuzzy matching threshold for string data (0.0 to 1.0
 # Date Filtering (optional)
 # start_date: "2014-01-01"
 # end_date: "2024-12-30"
+
+# Chunked-by-ID Validation (optional, recommended for very large tables)
+# When enabled, the tool ignores manual queries and the full-fetch path, and
+# instead processes the tables in id ranges (WHERE id BETWEEN ...). See the
+# "Chunked Validation for Large Tables" section below.
+# chunk_by_id: yes          # Enable chunked processing
+# id_chunk_size: 2000000    # Number of ids per chunk fetched from each DB
+# clickhouse_final: yes     # Apply FINAL on a ClickHouse ReplacingMergeTree table
 
 # ID Configuration
 composite_id_columns: ["ID"]  # Composite ID columns (use unique ID if single column)
@@ -266,35 +285,138 @@ queries:
    python config.py config.yaml
    ```
 
-2. **Or run the main validation script:**
+2. **Or run the main validation script** (loads the config itself; defaults to `config.yaml`):
    ```bash
-   python running_validation.py
+   python running_validation.py config.yaml
    ```
+
+#### Monitoring a run live
+
+Every run writes progress to a timestamped log file. Follow it in another terminal:
+
+```bash
+tail -f "$(ls -t logs/data_validation_*.log | head -1)"
+```
+
+For long, chunked runs you will see one checkpoint line per chunk, e.g.:
+
+```
+Chunked validation: id range [1, 60859676], chunk_size=2000000, total_chunks=31
+[checkpoint] chunk 1/31 id[1-2000000] rows mysql=2000000 clickhouse=2000000 | this chunk: missing_mysql+=0 missing_clickhouse+=0 diff+=0 | running totals: missing_mysql=0 missing_clickhouse=0 diff=0
+...
+✅ Chunked validation done. missing_in_mysql=0, missing_in_clickhouse=13, differing_values=0
+```
 
 ## Understanding the Output
 
 ### Output Files
 
-The validation generates two main output files in `output/result/`:
+The validation generates two output files in `output/result/`. File names embed both
+table names, the checked column, and a run timestamp, so successive runs never
+overwrite each other:
 
-1. **Main Results File** (`output_{database1}_{database2}_{check_column}_result.csv`):
-   - `missing_in_{database1}`: IDs missing in the first database
-   - `missing_in_{database2}`: IDs missing in the second database
-   - `differing_values`: Detailed information about value discrepancies
+```
+output_<db1>_<table1>_vs_<db2>_<table2>_<column>_<YYYYMMDD_HHMMSS>_result.csv
+output_<db1>_<table1>_vs_<db2>_<table2>_<column>_<YYYYMMDD_HHMMSS>_result_differing_values.csv
+```
 
-2. **Detailed Discrepancies File** (`output_{database1}_{database2}_{check_column}_result.csv_differing_values.csv`):
-   - `id`: The composite ID of the record
-   - `{check_column}_{database1}`: Value from the first database
-   - `{check_column}_{database2}`: Value from the second database
+1. **Main Results File** (`..._result.csv`):
+   - `missing_in_{database1}`: IDs present in the other database but missing here
+   - `missing_in_{database2}`: IDs present in the other database but missing here
+   - `differing_values`: records whose checked value differs
+
+   > **Note:** these three columns are **independent lists** padded to equal length —
+   > do **not** read the file row-wise (the value in row *N* of one column is unrelated
+   > to row *N* of another). Use the column-level contents and the detail file below.
+
+2. **Detailed Discrepancies File** (`..._result_differing_values.csv`) — **always created**, with just a header row when there are no differences:
+   - `id`: the (composite) ID of the record
+   - `{check_column}_{database1}`: value from the first database
+   - `{check_column}_{database2}`: value from the second database
 
 ### Log Files
 
 Detailed logging is provided in `logs/data_validation_{timestamp}.log`:
-- Connection status to each database
+- Connection status to each database (passwords/keys are **not** logged)
 - Query execution details
-- Batch processing progress
+- Batch/streaming/chunk progress (with per-chunk checkpoints)
 - Validation results summary
 - Error messages and troubleshooting information
+
+## Validation Modes (`--mode`)
+
+The chunked path supports two modes, selectable on the command line (this overrides any `mode:` in the YAML):
+
+| Command | What it does |
+|---------|--------------|
+| `python config.py <cfg> --mode missing` | **Missing-ID only.** Fetches just the id column from both sides and reports IDs present in one database but not the other. Fast and light. |
+| `python config.py <cfg> --mode full` | **Missing-ID + value differences.** Also compares column values. **This is the default.** |
+
+### Auto-detecting columns to compare
+
+In `--mode full`, if you **omit** `check_column`, the tool automatically compares **every column common to both tables**, excluding the id column and the ClickHouse/dlt meta columns (`ingested_at`, `version`, `_dlt_load_id`, `_dlt_id`). You no longer need to pick a single column.
+
+- Set `check_column` to restrict the comparison to one column (legacy behaviour).
+- Add `exclude_columns: [colA, colB]` to skip specific columns (e.g. noisy timestamps).
+- Comparison is **type-aware**: numeric columns compared numerically, datetime columns as timestamps, everything else as strings; `(null, null)` counts as equal.
+
+### Differing-values output (long format)
+
+The detail file lists **one row per differing cell**, so it stays readable no matter how many columns are compared:
+
+```
+id,column,value_mysql,value_clickhouse
+366403,name,CxuB...==,D2Kn...==
+366403,village_id,1671061005.0,0
+366403,updated_at,2026-04-23 09:22:24,2026-05-04 04:15:57
+```
+
+## Chunked Validation for Large Tables
+
+For tables with tens of millions of rows, loading both sides fully into memory can
+exhaust RAM (and ClickHouse `LIMIT/OFFSET` pagination becomes O(n²) and times out).
+The **chunked-by-id** path solves both problems.
+
+### How to enable
+
+```yaml
+chunk_by_id: yes
+id_chunk_size: 2000000        # ids per chunk fetched from each database
+clickhouse_final: yes         # apply FINAL on a ClickHouse ReplacingMergeTree
+composite_id_columns: ["id"]  # the numeric id column to range over (single column)
+# check_column: "activity_id" # OPTIONAL: omit in --mode full to compare ALL common columns
+# exclude_columns: ["created_at", "updated_at"]  # OPTIONAL: skip noisy columns
+# mode: full                  # OPTIONAL: missing | full (CLI --mode overrides this)
+mysql_table_name: "ws_transactions"
+clickhouse_table_name: "raw_ws_transactions"
+```
+
+> **Memory tip:** `--mode full` with auto-detected columns fetches *all* columns per
+> chunk, which is heavier than a single column. For very wide or very large tables,
+> lower `id_chunk_size` (e.g. `500000`) to keep each chunk within RAM.
+
+When `chunk_by_id: yes`, the tool ignores `is_using_manual_queries` and the full-fetch
+path. Instead it:
+
+1. Reads `MIN(id)`/`MAX(id)` from both databases to find the global id range.
+2. Iterates that range in steps of `id_chunk_size`, issuing `WHERE id BETWEEN lo AND hi`
+   against **both** databases (in parallel threads) per chunk.
+3. Compares each chunk (missing IDs both ways + value differences) and accumulates totals.
+4. Logs a checkpoint per chunk and writes the same two output files at the end.
+
+### Why it is correct across all periods
+
+Chunking is done by **`id`**, never by a date/period column. An id always falls into the
+same range on both sides regardless of its `created_at`/period, so an id is **never**
+falsely reported as missing just because its timestamp differs between source and target.
+This is the key advantage over filtering both sides by a date window.
+
+### Requirements & notes
+
+- The id column (`composite_id_columns[0]`) must be **numeric** to range over.
+- Memory stays bounded by `id_chunk_size` (e.g. ~2M rows per chunk), not the full table.
+- ClickHouse rows are read with a single **streamed** query per chunk (no `OFFSET`).
+- Tune `id_chunk_size` down if memory is tight, or up to reduce the number of round-trips.
 
 ## Advanced Configuration
 
@@ -350,11 +472,15 @@ For string data validation with tolerance for minor differences:
    - Ensure date column names match database schema
 
 3. **Memory Issues with Large Datasets**
+   - **Enable chunked-by-id validation** (`chunk_by_id: yes`) — the recommended fix for tables with millions of rows; see [Chunked Validation for Large Tables](#chunked-validation-for-large-tables)
+   - Lower `id_chunk_size` (chunked mode) to reduce per-chunk memory
    - Reduce `batch_size` in configuration
    - Monitor system memory usage during validation
-   - Consider running validation on smaller date ranges
 
-4. **Oracle Client Issues**
+4. **ClickHouse read timeouts / very slow ClickHouse fetch**
+   - This is the classic `LIMIT/OFFSET` problem on large tables; the tool now streams results and supports chunked-by-id processing — enable `chunk_by_id: yes`
+
+5. **Oracle Client Issues**
    - Verify Oracle Instant Client installation
    - Check `ORACLE_HOME` environment variable
    - Ensure cx_Oracle package version compatibility
