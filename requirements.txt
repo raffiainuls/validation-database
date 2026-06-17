@@ -1,0 +1,15 @@
+# Core dependencies for data validation tool
+pandas>=1.5.0
+boto3>=1.26.0
+pyodps>=0.12.0
+psycopg2-binary>=2.9.0
+cx_Oracle>=8.3.0
+clickhouse-connect>=0.6.0
+mysql-connector-python>=8.0.0
+PyYAML>=6.0
+
+# Optional dependencies for development
+jupyter>=1.0.0; extra == "dev"
+pytest>=7.0.0; extra == "dev"
+black>=22.0.0; extra == "dev"
+flake8>=5.0.0; extra == "dev"

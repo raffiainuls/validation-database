@@ -9,6 +9,8 @@ import os
 import psycopg2
 from datetime import datetime
 import cx_Oracle
+import clickhouse_connect
+import mysql.connector
 
 
 # setup logging
@@ -211,66 +213,222 @@ def fetch_data_alicloud(query, access_id, access_key, project_name, endpoint, ba
     print(f"Finished fetching Alibaba data. Total rows fetched: {len(result_df)}.")
     return result_df
 
+def fetch_data_clickhouse(query, host, port, database, user, password, batch_size):
+    print("Try to connect ClickHouse database....")
+    logging.info("Try to connect ClickHouse database....")
+    logging.info(f"host: {host}")
+    logging.info(f"port: {port}")
+    logging.info(f"database: {database}")
+    logging.info(f"user: {user}")
+    logging.info(f"password: {password}")
+    logging.info(f"batch_size: {batch_size}")
+    logging.info("Execute Using Query: ")
+    logging.info(f"{query}")
+    
+    try:
+        # Create connection to ClickHouse
+        client = clickhouse_connect.get_client(
+            host=host,
+            port=port,
+            database=database,
+            username=user,
+            password=password
+        )
+        logging.info("Connected to ClickHouse database")
+        print("Connected to ClickHouse database")
+
+        # Execute query and fetch results in batches
+        logging.info("Executing query on ClickHouse....")
+        
+        # First, get the total count to implement batching
+        count_query = f"SELECT COUNT(*) as total FROM ({query}) as subquery"
+        count_result = client.query(count_query)
+        total_rows = count_result.result_rows[0][0]
+        
+        logging.info(f"ClickHouse query succeeded. Total rows to fetch: {total_rows}.")
+        print(f"ClickHouse query succeeded. Total rows to fetch: {total_rows}.")
+        
+        all_data = []
+        offset = 0
+        batch_counter = 1
+        
+        while offset < total_rows:
+            # Fetch data in batches using LIMIT and OFFSET
+            batch_query = f"{query} LIMIT {batch_size} OFFSET {offset}"
+            batch_result = client.query(batch_query)
+            
+            # Convert to pandas DataFrame using the correct method
+            try:
+                batch_df = batch_result.df()
+            except AttributeError:
+                # Fallback for older versions of clickhouse_connect
+                batch_df = pd.DataFrame(batch_result.result_rows, columns=batch_result.column_names)
+            
+            if batch_df.empty:
+                break
+                
+            all_data.append(batch_df)
+            logging.info(f"Fetched Batch {batch_counter}, rows so far: {len(pd.concat(all_data, ignore_index=True))}.")
+            print(f"Fetched Batch {batch_counter}, rows so far: {len(pd.concat(all_data, ignore_index=True))}.")
+            batch_counter += 1
+            offset += batch_size
+        
+        # Combine all batches
+        final_df = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+        logging.info(f"Finished fetching ClickHouse data. Total rows fetched: {len(final_df)}.")
+        print(f"Finished fetching ClickHouse data. Total rows fetched: {len(final_df)}.")
+        
+        return final_df
+     
+    except Exception as e:
+        logging.error(f"Error fetching data from ClickHouse: {str(e)}")
+        raise
+
+def fetch_data_mysql(query, host, port, database, user, password, batch_size=1000):
+    print("Try to connect MySQL database....")
+    logging.info("Try to connect MySQL database....")
+    logging.info(f"host: {host}")
+    logging.info(f"port: {port}")
+    logging.info(f"database: {database}")
+    logging.info(f"user: {user}")
+    logging.info(f"password: {password}")
+    logging.info(f"batch_size: {batch_size}")
+    logging.info("Execute Using Query: ")
+    logging.info(f"{query}")
+    
+    try:
+        # Create connection to MySQL
+        conn = mysql.connector.connect(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password
+        )
+        logging.info("Connected to MySQL database")
+        print("Connected to MySQL database")
+
+        # Execute query and fetch results
+        logging.info("Executing query on MySQL....")
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Get column names
+        columns = [desc[0] for desc in cursor.description]
+        
+        # Fetch all data
+        all_data = []
+        batch_counter = 1
+        
+        while True:
+            data = cursor.fetchmany(batch_size)
+            if not data:
+                break
+            all_data.extend(data)
+            logging.info(f"Fetched Batch {batch_counter}, rows so far: {len(all_data)}.")
+            print(f"Fetched Batch {batch_counter}, rows so far: {len(all_data)}.")
+            batch_counter += 1
+        
+        # Close connection
+        cursor.close()
+        conn.close()
+        
+        logging.info(f"MySQL query succeeded. Total rows fetched: {len(all_data)}.")
+        print(f"MySQL query succeeded. Total rows fetched: {len(all_data)}.")
+        
+        return pd.DataFrame(all_data, columns=columns)
+     
+    except Exception as e:
+        logging.error(f"Error fetching data from MySQL: {str(e)}")
+        raise
+
 def validate_data_integer(first_df, second_df, check_column, output_filename, id_column, database1, database2):
 
     logging.info("Starting Validate Data")
     print("Starting Validate Data")
     logging.info("Column Check is Integer, Validate Data Integer Start .......")
-    first_df[id_column] = first_df[id_column].astype(str)
-    second_df[id_column] = second_df[id_column].astype(str)
+    
+    # Keep original ID data types, only convert for comparison when needed
+    # This preserves the original format while allowing proper numeric comparison
+    
+    # Ensure check columns are numeric for comparison
+    first_df[check_column] = pd.to_numeric(first_df[check_column], errors='coerce')
+    second_df[check_column] = pd.to_numeric(second_df[check_column], errors='coerce')
+    
+    # Log data sizes for debugging
+    print(f"First database ({database1}) data size: {len(first_df)} rows")
+    print(f"Second database ({database2}) data size: {len(second_df)} rows")
+    logging.info(f"First database ({database1}) data size: {len(first_df)} rows")
+    logging.info(f"Second database ({database2}) data size: {len(second_df)} rows")
 
-    #validate missing IDs
-    print("Processing Find Missing Ids")
-    logging.info("Processing Find Missing Ids")
-    missing_in_first_database = second_df[~second_df[id_column].isin(first_df[id_column])][id_column].tolist()
-    missing_in_second_database = first_df[~first_df[id_column].isin(second_df[id_column])][id_column].tolist()
+    # Simple validation without batching
+    print("Processing validation without batching...")
+    logging.info("Processing validation without batching...")
+    
+    # Initialize results
+    missing_in_database1 = []
+    missing_in_database2 = []
+    differing_values_list = []
+    
+    # Convert both dataframes to sets for faster lookup
+    first_ids_set = set(first_df[id_column].astype(str))
+    second_ids_set = set(second_df[id_column].astype(str))
+    
+    # Find IDs that exist in both databases
+    common_ids = first_ids_set.intersection(second_ids_set)
+    
+    # Find missing IDs in second database (those in first but not in second)
+    missing_in_database2 = list(first_ids_set - second_ids_set)
+    
+    # Find missing IDs in first database (those in second but not in first)
+    missing_in_database1 = list(second_ids_set - first_ids_set)
+    
+    # Find differing values for common IDs
+    if len(common_ids) > 0:
+        # Get data for common IDs
+        first_common = first_df[first_df[id_column].astype(str).isin(common_ids)]
+        second_common = second_df[second_df[id_column].astype(str).isin(common_ids)]
+        
+        # Create lookup dictionaries
+        first_dict = dict(zip(first_common[id_column].astype(str), first_common[check_column]))
+        second_dict = dict(zip(second_common[id_column].astype(str), second_common[check_column]))
+        
+        # Check for differing values
+        for id_val in common_ids:
+            first_val = first_dict.get(id_val)
+            second_val = second_dict.get(id_val)
+            
+            if pd.notna(first_val) and pd.notna(second_val):
+                if first_val != second_val:
+                    differing_values_list.append({
+                        f'{id_column}_{database1}': id_val,
+                        f'{check_column}_{database1}': first_val,
+                        f'{id_column}_{database2}': id_val,
+                        f'{check_column}_{database2}': second_val
+                    })
+
+    print(f"Found {len(missing_in_database1)} IDs missing in {database1}")
+    print(f"Found {len(missing_in_database2)} IDs missing in {database2}")
+    print(f"Found {len(differing_values_list)} records with differing values")
+    logging.info(f"IDs missing in {database1}: {len(missing_in_database1)}")
+    logging.info(f"IDs missing in {database2}: {len(missing_in_database2)}")
+    logging.info(f"Differing values count: {len(differing_values_list)}")
+    
     print("Processing Validate Missing Ids Done.")
     logging.info("Processing Validate Missing Ids Done.")
 
-    #validate differing values 
-    print("Processing Differing Values ......")
-    logging.info("Processing Differing Values.......")
-    merged_df = pd.merge(
-        first_df[[id_column, check_column]],
-        second_df[[id_column, check_column]],
-        on=id_column,
-        suffixes=(f'_{database1}', f'_{database2}'),
-        how= 'inner'
-    )
-
-    # handle cases 13 and 13.0 is same
-    merged_df[check_column + f'_{database1}'] = merged_df[check_column + f'_{database1}'].apply(pd.to_numeric, errors='coerce')
-    merged_df[check_column + f'_{database2}'] = merged_df[check_column + f'_{database2}'].apply(pd.to_numeric, errors='coerce')
-
-    # filter differing values while ignoring tobe rows where both are Nan 
-    differing_values = merged_df[
-        (merged_df[f'{check_column}_{database1}'] != merged_df[f'{check_column}_{database2}']) &
-        ~(merged_df[f'{check_column}_{database1}'].isna() & merged_df[f'{check_column}_{database2}'].isna())
-    ]
-
-    # log result 
-    # logging.info(f"IDs Missing in {database1}: {missing_in_first_database}")
-    # logging.info(f"IDs Missing in {database2}: {missing_in_second_database}")
-    # logging.info(f"Differing values:\n{differing_values}")
-
-    if not differing_values.empty:
-        differing_values_list = differing_values.to_dict('records')
-    else:
-        differing_values_list =[]
-
     # menyesuaikan panjang with None or Nan
-    max_len = max(len(missing_in_first_database), len(missing_in_second_database), len(differing_values_list))
+    max_len = max(len(missing_in_database1), len(missing_in_database2), len(differing_values_list))
 
     #ensure all list have same length 
-    missing_in_first_database.extend([None] * (max_len - len(missing_in_first_database)))
-    missing_in_second_database.extend([None] * (max_len - len(missing_in_second_database)))
+    missing_in_database1.extend([None] * (max_len - len(missing_in_database1)))
+    missing_in_database2.extend([None] * (max_len - len(missing_in_database2)))
     differing_values_list.extend([None] * (max_len - len(differing_values_list)))
 
     # Create DataFrame for validation results 
-
     validation_df = pd.DataFrame({
-        f'missing_in_{database1}': missing_in_first_database,
-        f'missing_in_{database2}': missing_in_second_database,
+        f'missing_in_{database1}': missing_in_database1,
+        f'missing_in_{database2}': missing_in_database2,
         'differing_values': differing_values_list
     })
 
@@ -288,9 +446,9 @@ def validate_data_integer(first_df, second_df, check_column, output_filename, id
     outputfile_id_differing_values = f"{output_filename}_differing_values.csv"
 
     # Create a CSV for differing values (ID and check_column only)
-    if not differing_values.empty:
-        differing_values_csv = differing_values[[id_column, f'{check_column}_{database1}', f'{check_column}_{database2}']]
-        differing_values_csv.to_csv(outputfile_id_differing_values, index=False)
+    if differing_values_list:
+        differing_values_df = pd.DataFrame(differing_values_list)
+        differing_values_df.to_csv(outputfile_id_differing_values, index=False)
     logging.info(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
     print(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
 
@@ -454,8 +612,30 @@ def validate_data_date(first_df, second_df, check_column, output_filename, id_co
 
     
 def main(config):
-    # Load variables from config
-    credentials = config['credentials']
+    # Load credentials from separate files
+    credentials = {}
+    
+    # Load MySQL credentials
+    try:
+        with open('creds/mysql.json', 'r') as f:
+            credentials['mysql'] = yaml.safe_load(f)
+    except FileNotFoundError:
+        print("MySQL credentials file not found")
+    
+    # Load ClickHouse credentials  
+    try:
+        with open('creds/clickhouse.json', 'r') as f:
+            credentials['clickhouse'] = yaml.safe_load(f)
+    except FileNotFoundError:
+        print("ClickHouse credentials file not found")
+    
+    # Load other credentials if they exist
+    for db in ['postgres', 'oracle', 'aws', 'ali']:
+        try:
+            with open(f'creds/{db}.json', 'r') as f:
+                credentials[db] = yaml.safe_load(f)
+        except FileNotFoundError:
+            pass
     databases_to_check = config.get('databases', [])
     batch_size = config.get('batch_size', 1000)
     output_directory = config.get('output_directory', './output')
@@ -468,17 +648,57 @@ def main(config):
 
     # Prepare composite ID expression dynamically
     composite_columns = config['composite_id_columns']
-    id_expr_templates = {
-        'aws': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS VARCHAR), '0') AS VARCHAR)" for col in composite_columns]),
-        'ali': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS STRING), '0') AS STRING)" for col in composite_columns]),
-        'postgres': " || '_' || ".join([f"CAST(COALESCE(CAST(\"{col}\" AS VARCHAR), '0') AS VARCHAR)" for col in composite_columns]),
-        'oracle': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS VARCHAR2(255)), '0') AS VARCHAR2(255))" for col in composite_columns])
-    }
+    
+    # Handle single column case to avoid unnecessary composite formatting
+    if len(composite_columns) == 1:
+        single_col = composite_columns[0]
+        id_expr_templates = {
+            'aws': f"CAST(COALESCE(CAST({single_col} AS VARCHAR), '0') AS VARCHAR)",
+            'ali': f"CAST(COALESCE(CAST({single_col} AS STRING), '0') AS STRING)",
+            'postgres': f"CAST(COALESCE(CAST(\"{single_col}\" AS VARCHAR), '0') AS VARCHAR)",
+            'oracle': f"CAST(COALESCE(CAST({single_col} AS VARCHAR2(255)), '0') AS VARCHAR2(255))",
+            'clickhouse': f"CAST(COALESCE(CAST({single_col} AS String), '0') AS String)",
+            'mysql': f"COALESCE(CAST({single_col} AS CHAR), '0')"
+        }
+    else:
+        # Multiple columns - use composite logic
+        id_expr_templates = {
+            'aws': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS VARCHAR), '0') AS VARCHAR)" for col in composite_columns]),
+            'ali': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS STRING), '0') AS STRING)" for col in composite_columns]),
+            'postgres': " || '_' || ".join([f"CAST(COALESCE(CAST(\"{col}\" AS VARCHAR), '0') AS VARCHAR)" for col in composite_columns]),
+            'oracle': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS VARCHAR2(255)), '0') AS VARCHAR2(255))" for col in composite_columns]),
+            'clickhouse': " || '_' || ".join([f"CAST(COALESCE(CAST({col} AS String), '0') AS String)" for col in composite_columns]),
+            'mysql': "CONCAT_WS('_', " + ", ".join([f"COALESCE(CAST({col} AS CHAR), '0')" for col in composite_columns]) + ")"
+        }
     
     def construct_query(database, table_name, date_column=None):
         """
         Generate query for the given database and table based on its specific syntax.
         """
+        # Check if manual queries are being used
+        is_manual = config.get('is_using_manual_queries', 'no')
+        print(f"DEBUG: is_using_manual_queries = {is_manual} (type: {type(is_manual)})")
+        print(f"DEBUG: str(is_manual).lower() = {str(is_manual).lower()}")
+        if str(is_manual).lower() in ['yes', 'true']:
+            print(f"DEBUG: Using manual queries for {database}")
+            if database == database1:
+                manual_query = config['queries']['first_query'].strip()
+                print(f"DEBUG: Manual query for {database1}: {manual_query}")
+                # Add ORDER BY to manual query
+                if 'ORDER BY' not in manual_query.upper():
+                    manual_query = f"{manual_query} ORDER BY id"
+                return manual_query
+            elif database == database2:
+                manual_query = config['queries']['second_query'].strip()
+                print(f"DEBUG: Manual query for {database2}: {manual_query}")
+                # Add ORDER BY to manual query
+                if 'ORDER BY' not in manual_query.upper():
+                    manual_query = f"{manual_query} ORDER BY id"
+                return manual_query
+            else:
+                raise ValueError(f"Manual query not found for database: {database}")
+        
+        # Auto-generated queries (original logic)
         id_expr = id_expr_templates.get(database)
         if not id_expr:
             raise ValueError(f"Unsupported database type: {database}")
@@ -494,6 +714,7 @@ def main(config):
                     FROM {table_name}
                     WHERE "{date_column}" > timestamp '{config['start_date']} 00:00:00.000' 
                     AND "{date_column}" < timestamp '{config['end_date']} 00:00:00.000'
+                    ORDER BY id
                 """
             else:
                 return f"""
@@ -501,6 +722,7 @@ def main(config):
                         {id_expr} AS id,
                         "{config['check_column']}"
                     FROM {table_name}
+                    ORDER BY id
                 """
 
         # Oracle
@@ -514,6 +736,7 @@ def main(config):
                     FROM {table_name}
                     WHERE {date_column} > TO_DATE('{config['start_date']} 00:00:00', 'YYYY-MM-DD HH24:MI:SS')
                     AND {date_column} < TO_DATE('{config['end_date']} 00:00:00', 'YYYY-MM-DD HH24:MI:SS')
+                    ORDER BY id
                 """
             else:
                 return f"""
@@ -521,6 +744,7 @@ def main(config):
                         {id_expr} AS id,
                         {config['check_column']}
                     FROM {table_name}
+                    ORDER BY id
                 """
 
         # AWS 
@@ -534,6 +758,7 @@ def main(config):
                     FROM {table_name}
                     WHERE {date_column} > '{config['start_date']} 00:00:00' 
                     AND {date_column} < '{config['end_date']} 00:00:00'
+                    ORDER BY id
                 """
             else:
                 return f"""
@@ -541,6 +766,7 @@ def main(config):
                         {id_expr} AS id,
                         {config['check_column']}
                     FROM {table_name}
+                    ORDER BY id
                 """
         elif database == 'ali':
             if 'start_date' in config and 'end_date' in config and date_column:
@@ -552,6 +778,7 @@ def main(config):
                     FROM {table_name}
                     WHERE {date_column} > '{config['start_date']} 00:00:00' 
                     AND {date_column} < '{config['end_date']} 00:00:00'
+                    ORDER BY id
                 """
             else:
                 return f"""
@@ -559,6 +786,47 @@ def main(config):
                         {id_expr} AS id,
                         {config['check_column']}
                     FROM {table_name}
+                    ORDER BY id
+                """
+        elif database == 'mysql':
+            if 'start_date' in config and 'end_date' in config and date_column:
+                return f"""
+                    SELECT 
+                        {id_expr} AS id,
+                        {config['check_column']}, 
+                        {date_column} AS formatted_date
+                    FROM {table_name}
+                    WHERE {date_column} > '{config['start_date']} 00:00:00' 
+                    AND {date_column} < '{config['end_date']} 00:00:00'
+                    ORDER BY id
+                """
+            else:
+                return f"""
+                    SELECT 
+                        {id_expr} AS id,
+                        {config['check_column']}
+                    FROM {table_name}
+                    ORDER BY id
+                """
+        elif database == 'clickhouse':
+            if 'start_date' in config and 'end_date' in config and date_column:
+                return f"""
+                    SELECT 
+                        {id_expr} AS id,
+                        {config['check_column']}, 
+                        {date_column} AS formatted_date
+                    FROM {table_name}
+                    WHERE {date_column} > '{config['start_date']} 00:00:00' 
+                    AND {date_column} < '{config['end_date']} 00:00:00'
+                    ORDER BY id
+                """
+            else:
+                return f"""
+                    SELECT 
+                        {id_expr} AS id,
+                        {config['check_column']}
+                    FROM {table_name}
+                    ORDER BY id
                 """
 
         else:
@@ -602,6 +870,24 @@ def main(config):
                 credentials['oracle']['username_oracle'],
                 credentials['oracle']['password_oracle'],
                 batch_size
+            ),
+            'clickhouse': lambda: fetch_data_clickhouse(
+                query,
+                credentials['clickhouse']['host_clickhouse'],
+                credentials['clickhouse']['port_clickhouse'],
+                credentials['clickhouse']['database_clickhouse'],
+                credentials['clickhouse']['username_clickhouse'],
+                credentials['clickhouse']['password_clickhouse'],
+                batch_size
+            ),
+            'mysql': lambda: fetch_data_mysql(
+                query,
+                credentials['mysql']['hostname_mysql'],
+                credentials['mysql']['port_mysql'],
+                credentials['mysql']['database_mysql'],
+                credentials['mysql']['username_mysql'],
+                credentials['mysql']['password_mysql'],
+                batch_size
             )
         }
         
@@ -623,12 +909,27 @@ def main(config):
     print(f"execute query1 for {database2}")
     print(f"execute query1 for {query2}")
     
+    print("Starting parallel data fetching from both databases...")
+    logging.info("Starting parallel data fetching from both databases...")
+    
     with ThreadPoolExecutor() as executor:
         first_future = executor.submit(fetch_data, database1, query1)
         second_future = executor.submit(fetch_data, database2, query2)
         
+        print(f"Waiting for {database1} data fetch to complete...")
+        logging.info(f"Waiting for {database1} data fetch to complete...")
         first_df = first_future.result()
+        print(f"{database1} data fetch completed successfully!")
+        logging.info(f"{database1} data fetch completed successfully!")
+        
+        print(f"Waiting for {database2} data fetch to complete...")
+        logging.info(f"Waiting for {database2} data fetch to complete...")
         second_df = second_future.result()
+        print(f"{database2} data fetch completed successfully!")
+        logging.info(f"{database2} data fetch completed successfully!")
+    
+    print("✅ Both database fetches completed. Starting validation process...")
+    logging.info("✅ Both database fetches completed. Starting validation process...")
     
     # Sort and compare results
     first_df.columns.values[0] = first_df.columns.values[0].lower()
