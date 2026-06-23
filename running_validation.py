@@ -5,12 +5,59 @@ import yaml
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
-import os 
+import os
 import psycopg2
 from datetime import datetime
 import cx_Oracle
 import clickhouse_connect
 import mysql.connector
+import threading
+import time as _time
+
+
+class Heartbeat:
+    """Background thread that logs '[heartbeat] alive Ns | <phase>' every
+    `interval` seconds, so a long-running fetch/compare visibly proves the
+    process is still alive (not stuck). Update the current phase via set()."""
+
+    def __init__(self, interval=60):
+        self.interval = max(10, int(interval))
+        self.phase = "starting"
+        self._stop = threading.Event()
+        self._thread = None
+        self._start = None
+
+    def set(self, phase):
+        self.phase = phase
+
+    def start(self):
+        self._start = _time.time()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            elapsed = int(_time.time() - self._start)
+            msg = f"[heartbeat] alive {elapsed}s | {self.phase}"
+            logging.info(msg)
+            print(msg, flush=True)
+
+    def stop(self):
+        self._stop.set()
+
+
+# A single active heartbeat, reset per validated table so threads never leak
+# across tables in a batch run.
+_ACTIVE_HB = None
+
+
+def _hb_start(interval=60):
+    global _ACTIVE_HB
+    if _ACTIVE_HB is not None:
+        _ACTIVE_HB.stop()
+    _ACTIVE_HB = Heartbeat(interval)
+    _ACTIVE_HB.start()
+    return _ACTIVE_HB
 
 
 # setup logging
@@ -219,8 +266,9 @@ def fetch_data_clickhouse(query, host, port, database, user, password, batch_siz
     logging.info(f"{query}")
 
     try:
-        # Create connection to ClickHouse. A long send/receive timeout keeps the
-        # streaming request alive while the server produces large result sets.
+        # Create connection to ClickHouse. send_receive_timeout bounds how long a
+        # stalled request may hang before erroring (then the batch retries) -- kept
+        # moderate (10 min) so a truly stuck read is detected quickly, not after 1h.
         client = clickhouse_connect.get_client(
             host=host,
             port=port,
@@ -228,7 +276,7 @@ def fetch_data_clickhouse(query, host, port, database, user, password, batch_siz
             username=user,
             password=password,
             connect_timeout=30,
-            send_receive_timeout=3600
+            send_receive_timeout=600
         )
         logging.info("Connected to ClickHouse database")
         print("Connected to ClickHouse database")
@@ -618,12 +666,21 @@ def validate_data_date(first_df, second_df, check_column, output_filename, id_co
         print(f"Id Differing Values csv file save into {outputfile_id_differing_values}")
 
     
+def _qid(database, col):
+    """Quote a column identifier for the given engine so reserved words
+    (e.g. MySQL `signal`) and odd names don't break the SQL."""
+    if database == 'postgres':
+        return f'"{col}"'
+    if database in ('mysql', 'clickhouse'):
+        return f'`{col}`'
+    return col
+
+
 def build_minmax_query(database, id_column, table_name, use_final=False):
     """MIN/MAX of the numeric id column, used to derive chunk boundaries."""
     final = " FINAL" if (database == 'clickhouse' and use_final) else ""
-    if database == 'postgres':
-        return f'SELECT MIN("{id_column}") AS lo, MAX("{id_column}") AS hi FROM {table_name}'
-    return f"SELECT MIN({id_column}) AS lo, MAX({id_column}) AS hi FROM {table_name}{final}"
+    c = _qid(database, id_column)
+    return f"SELECT MIN({c}) AS lo, MAX({c}) AS hi FROM {table_name}{final}"
 
 
 def build_range_query(database, id_column, check_column, table_name, lo, hi, use_final=False):
@@ -692,31 +749,31 @@ def compare_chunk(first_df, second_df, check_column, data_type, threshold, datab
 CLICKHOUSE_META_COLUMNS = {'ingested_at', 'version', '_dlt_load_id', '_dlt_id'}
 
 
-def detect_value_columns(fetch_data, database1, table1, database2, table2, id_column, extra_excludes=None):
-    """Return the list of columns present in BOTH tables, excluding the id column
-    and ClickHouse/dlt meta columns. Order follows the source table."""
+def detect_value_columns(fetch_data, database1, table1, database2, table2, key_columns, extra_excludes=None):
+    """Return the list of columns present in BOTH tables, excluding the key
+    column(s) and ClickHouse/dlt meta columns. Order follows the source table."""
     src_cols = list(fetch_data(database1, f"SELECT * FROM {table1} LIMIT 1").columns)
     tgt_cols = set(fetch_data(database2, f"SELECT * FROM {table2} LIMIT 1").columns)
     excludes = set(CLICKHOUSE_META_COLUMNS)
-    excludes.add(id_column)
+    excludes.update(key_columns)
     if extra_excludes:
         excludes.update(extra_excludes)
     return [c for c in src_cols if c in tgt_cols and c not in excludes]
 
 
-def build_range_query_multi(database, id_column, value_columns, table_name, lo, hi, use_final=False):
-    """Build a per-id-range query selecting the id plus the given value columns.
-    If value_columns is empty (missing-only mode), only the id is fetched."""
+def build_range_query_multi(database, key_columns, value_columns, table_name, chunk_column, lo, hi, use_final=False):
+    """Build a per-range query selecting the key column(s) plus the value columns,
+    filtered on a numeric chunk_column. When lo is None, no range filter is applied
+    (full-table scan) -- used when the key has no numeric column to chunk on. In
+    missing-only mode value_columns is empty and only the key columns are fetched."""
     final = " FINAL" if (database == 'clickhouse' and use_final) else ""
+    cols = list(key_columns) + list(value_columns)
+    full_scan = lo is None
+    sel = ", ".join(_qid(database, c) for c in cols)
+    where = "" if full_scan else f" WHERE {_qid(database, chunk_column)} BETWEEN {lo} AND {hi}"
     if database == 'postgres':
-        sel = f'"{id_column}" AS id'
-        if value_columns:
-            sel += ", " + ", ".join(f'"{c}"' for c in value_columns)
-        return f'SELECT {sel} FROM {table_name} WHERE "{id_column}" BETWEEN {lo} AND {hi}'
-    sel = f"{id_column} AS id"
-    if value_columns:
-        sel += ", " + ", ".join(value_columns)
-    return f"SELECT {sel} FROM {table_name}{final} WHERE {id_column} BETWEEN {lo} AND {hi}"
+        return f'SELECT {sel} FROM {table_name}{where}'
+    return f"SELECT {sel} FROM {table_name}{final}{where}"
 
 
 def _column_diff_mask(a, b, threshold):
@@ -734,32 +791,52 @@ def _column_diff_mask(a, b, threshold):
     return (an != bn) & ~(an.isna() & bn.isna())
 
 
-def compare_chunk_multi(first_df, second_df, value_columns, mode, threshold, database1, database2):
-    """Compare one id-range chunk across (optionally) many columns.
+def _composite_key(df, key_columns):
+    """Build a single string key from one or more key columns (joined by '_')."""
+    if len(key_columns) == 1:
+        return df[key_columns[0]].astype(str)
+    return df[list(key_columns)].astype(str).agg('_'.join, axis=1)
 
-    mode='missing' -> only missing-id detection (value_columns may be empty).
-    mode='full'    -> missing-id detection + per-column value differences.
+
+def compare_chunk_multi(first_df, second_df, key_columns, value_columns, mode, threshold, database1, database2):
+    """Compare one chunk across (optionally) many columns, keyed on key_columns
+    (single or composite).
+
+    mode='missing' -> only missing-key detection (value_columns may be empty).
+    mode='full'    -> missing-key detection + per-column value differences.
 
     Returns (missing_in_db1, missing_in_db2, differing_records) where each
-    differing record is a long-format dict:
-        {id, column, value_<db1>, value_<db2>}.
+    differing record is a long-format dict: {id, column, value_<db1>, value_<db2>}.
+    The 'id' field holds the (composite) key value.
     """
-    first_df.columns = ['id'] + list(value_columns)
-    second_df.columns = ['id'] + list(value_columns)
-    first_df['id'] = first_df['id'].astype(str)
-    second_df['id'] = second_df['id'].astype(str)
+    expected_cols = list(key_columns) + list(value_columns)
 
-    s1 = set(first_df['id'])
-    s2 = set(second_df['id'])
+    def _normalize(df):
+        # An empty fetch (e.g. a chunk range with no rows) can come back with
+        # zero columns; rebuild it with the expected columns so the rest works.
+        if df.shape[1] != len(expected_cols):
+            return pd.DataFrame(columns=expected_cols)
+        df.columns = expected_cols
+        return df
+
+    first_df = _normalize(first_df)
+    second_df = _normalize(second_df)
+    first_df['__key'] = _composite_key(first_df, key_columns)
+    second_df['__key'] = _composite_key(second_df, key_columns)
+
+    s1 = set(first_df['__key'])
+    s2 = set(second_df['__key'])
     missing_in_db2 = list(s1 - s2)   # in db1 but not db2
     missing_in_db1 = list(s2 - s1)   # in db2 but not db1
 
     if mode == 'missing' or not value_columns:
         return missing_in_db1, missing_in_db2, []
 
-    f = first_df.drop_duplicates('id', keep='last')
-    s = second_df.drop_duplicates('id', keep='last')
-    merged = pd.merge(f, s, on='id', how='inner', suffixes=('__s', '__t'))
+    f = first_df.drop_duplicates('__key', keep='last')
+    s = second_df.drop_duplicates('__key', keep='last')
+    merged = pd.merge(f[['__key'] + list(value_columns)],
+                      s[['__key'] + list(value_columns)],
+                      on='__key', how='inner', suffixes=('__s', '__t'))
     if merged.empty:
         return missing_in_db1, missing_in_db2, []
 
@@ -771,9 +848,9 @@ def compare_chunk_multi(first_df, second_df, value_columns, mode, threshold, dat
         b = merged[f'{col}__t']
         mask = _column_diff_mask(a, b, threshold)
         if mask.any():
-            sub = merged.loc[mask, ['id', f'{col}__s', f'{col}__t']]
+            sub = merged.loc[mask, ['__key', f'{col}__s', f'{col}__t']]
             part = pd.DataFrame({
-                'id': sub['id'].values,
+                'id': sub['__key'].values,
                 'column': col,
                 val1: sub[f'{col}__s'].values,
                 val2: sub[f'{col}__t'].values,
@@ -992,68 +1069,55 @@ def main(config):
             raise ValueError(f"Database type '{database}' is not supported in the query generator.")
 
 
+    def alias_engine(alias):
+        """Resolve the engine type for a side. Defaults to the alias itself, so
+        existing configs (database1: mysql) keep working. To compare two of the
+        same engine (e.g. ClickHouse vs ClickHouse), use distinct aliases and set
+        '<alias>_type: clickhouse' for each."""
+        return str(config.get(f'{alias}_type', alias)).lower()
+
+    def alias_creds_key(alias):
+        """Which credentials entry to use for a side (creds/<key>.json). Defaults
+        to the engine type, so two ClickHouse sides on the SAME server can share
+        one credentials file and differ only by fully-qualified table names."""
+        return config.get(f'{alias}_creds', alias_engine(alias))
+
     def fetch_data(database, query):
         """
-        Generic fetch data function that dynamically calls the appropriate fetch method.
+        Generic fetch data function. `database` is a side alias; the engine type
+        and credentials entry are resolved via alias_engine / alias_creds_key.
         """
-        fetch_functions = {
-            'aws': lambda: fetch_data_aws(
-                query,
-                credentials['aws']['aws_database'],
-                credentials['aws']['output_location'],
-                credentials['aws']['aws_region'],
-                credentials['aws']['aws_access_key_id'],
-                credentials['aws']['aws_secret_access_key'],
-                batch_size
-            ),
-            'ali': lambda: fetch_data_alicloud(
-                query,
-                credentials['ali']['ali_access_id'],
-                credentials['ali']['ali_access_key'],
-                credentials['ali']['ali_project_name'],
-                credentials['ali']['ali_endpoint'],
-                batch_size
-            ),
-            'postgres': lambda: fetch_data_postgres(
-                query,
-                credentials['postgres']['hostname_postgres'],
-                credentials['postgres']['port_postgres'],
-                credentials['postgres']['database_postgres'],
-                credentials['postgres']['username_postgres'],
-                credentials['postgres']['password_postgres'],
-                batch_size
-            ),
-            'oracle': lambda: fetch_data_oracle(
-                query,
-                credentials['oracle']['dsn_oracle'],
-                credentials['oracle']['username_oracle'],
-                credentials['oracle']['password_oracle'],
-                batch_size
-            ),
-            'clickhouse': lambda: fetch_data_clickhouse(
-                query,
-                credentials['clickhouse']['host_clickhouse'],
-                credentials['clickhouse']['port_clickhouse'],
-                credentials['clickhouse']['database_clickhouse'],
-                credentials['clickhouse']['username_clickhouse'],
-                credentials['clickhouse']['password_clickhouse'],
-                batch_size
-            ),
-            'mysql': lambda: fetch_data_mysql(
-                query,
-                credentials['mysql']['hostname_mysql'],
-                credentials['mysql']['port_mysql'],
-                credentials['mysql']['database_mysql'],
-                credentials['mysql']['username_mysql'],
-                credentials['mysql']['password_mysql'],
-                batch_size
-            )
-        }
-        
-        fetch_function = fetch_functions.get(database.lower())
-        if not fetch_function:
-            raise ValueError(f"Unsupported database type: {database}")
-        return fetch_function()
+        engine = alias_engine(database)
+        creds_key = alias_creds_key(database)
+        try:
+            creds = credentials[creds_key]
+        except KeyError:
+            raise ValueError(f"Missing credentials '{creds_key}' for side '{database}' "
+                             f"(expected creds/{creds_key}.json)")
+
+        if engine == 'aws':
+            return fetch_data_aws(query, creds['aws_database'], creds['output_location'],
+                                  creds['aws_region'], creds['aws_access_key_id'],
+                                  creds['aws_secret_access_key'], batch_size)
+        if engine == 'ali':
+            return fetch_data_alicloud(query, creds['ali_access_id'], creds['ali_access_key'],
+                                       creds['ali_project_name'], creds['ali_endpoint'], batch_size)
+        if engine == 'postgres':
+            return fetch_data_postgres(query, creds['hostname_postgres'], creds['port_postgres'],
+                                       creds['database_postgres'], creds['username_postgres'],
+                                       creds['password_postgres'], batch_size)
+        if engine == 'oracle':
+            return fetch_data_oracle(query, creds['dsn_oracle'], creds['username_oracle'],
+                                     creds['password_oracle'], batch_size)
+        if engine == 'clickhouse':
+            return fetch_data_clickhouse(query, creds['host_clickhouse'], creds['port_clickhouse'],
+                                         creds['database_clickhouse'], creds['username_clickhouse'],
+                                         creds['password_clickhouse'], batch_size)
+        if engine == 'mysql':
+            return fetch_data_mysql(query, creds['hostname_mysql'], creds['port_mysql'],
+                                    creds['database_mysql'], creds['username_mysql'],
+                                    creds['password_mysql'], batch_size)
+        raise ValueError(f"Unsupported engine type: {engine}")
     
     # Process databases dynamically
     if len(databases_to_check) != 2:
@@ -1069,66 +1133,108 @@ def main(config):
     # missing-id detection remains correct across ALL periods (an id lands in
     # the same range on both sides regardless of its created_at).
     if str(config.get('chunk_by_id', 'no')).lower() in ('yes', 'true'):
-        id_col = composite_columns[0]
+        # Key column(s) used to match rows (single or composite).
+        key_columns = list(composite_columns)
+        # Numeric column ranged over for chunking. Defaults to the first key
+        # column; override with `chunk_column` when the key is non-numeric.
+        chunk_column = config.get('chunk_column', key_columns[0])
         chunk_size = int(config.get('id_chunk_size', 2000000))
-        use_final = str(config.get('clickhouse_final', 'yes')).lower() in ('yes', 'true')
+        # ClickHouse queries ALWAYS use FINAL so ReplacingMergeTree rows are
+        # deduplicated; otherwise un-merged duplicates cause false count/value diffs.
+        use_final = True
         table1_name = config[f'{database1}_table_name']
         table2_name = config[f'{database2}_table_name']
+        # Engine types (used for SQL syntax / FINAL); aliases may differ from these.
+        engine1 = alias_engine(database1)
+        engine2 = alias_engine(database2)
 
-        # Validation mode: 'missing' (ids only) or 'full' (ids + value diffs).
+        # Validation mode: 'missing' (keys only) or 'full' (keys + value diffs).
         mode = str(config.get('mode', 'full')).lower()
         if mode not in ('missing', 'full'):
             mode = 'full'
 
-        # In full mode, compare every column common to both tables (minus the id
-        # and ClickHouse/dlt meta columns) unless an explicit check_column is set.
+        # Time-based heartbeat so long fetch/compare phases visibly stay alive.
+        hb = _hb_start(int(config.get('heartbeat_seconds', 60)))
+        hb.set(f"{table1_name} vs {table2_name}: starting (mode={mode})")
+
+        # In full mode, compare every column common to both tables (minus the key
+        # column(s) and ClickHouse/dlt meta columns) unless check_column is set.
         if mode == 'full':
             explicit = config.get('check_column')
             if explicit:
                 value_columns = [explicit]
             else:
+                hb.set(f"{table1_name}: detecting common columns")
+                logging.info("[phase] detecting common columns..."); print("[phase] detecting common columns...")
                 value_columns = detect_value_columns(
-                    fetch_data, database1, table1_name, database2, table2_name, id_col,
+                    fetch_data, database1, table1_name, database2, table2_name, key_columns,
                     extra_excludes=config.get('exclude_columns'))
         else:
             value_columns = []
 
-        scope = "missing-id only" if mode == 'missing' else f"{len(value_columns)} columns: {value_columns}"
-        head0 = f"Validation mode: {mode} ({scope})"
+        scope = "missing-key only" if mode == 'missing' else f"{len(value_columns)} columns: {value_columns}"
+        head0 = f"Validation mode: {mode} | key={key_columns} | chunk_column={chunk_column} ({scope})"
         logging.info(head0); print(head0)
 
-        # Determine the global id range across both databases.
-        mm1 = fetch_data(database1, build_minmax_query(database1, id_col, table1_name, use_final))
-        mm2 = fetch_data(database2, build_minmax_query(database2, id_col, table2_name, use_final))
-        gmin = int(min(mm1.iloc[0, 0], mm2.iloc[0, 0]))
-        gmax = int(max(mm1.iloc[0, 1], mm2.iloc[0, 1]))
-        total_chunks = (gmax - gmin) // chunk_size + 1
-        head = (f"Chunked validation: id range [{gmin}, {gmax}], "
-                f"chunk_size={chunk_size}, total_chunks={total_chunks}")
+        # Determine the global range of the chunk column across both databases.
+        # If the chunk column is non-numeric (no numeric key to range over), fall
+        # back to a single full-table scan per side.
+        full_scan = False
+        try:
+            hb.set(f"{table1_name}: computing {chunk_column} MIN/MAX range")
+            logging.info(f"[phase] computing {chunk_column} MIN/MAX range...")
+            print(f"[phase] computing {chunk_column} MIN/MAX range...")
+            mm1 = fetch_data(database1, build_minmax_query(engine1, chunk_column, table1_name, use_final))
+            mm2 = fetch_data(database2, build_minmax_query(engine2, chunk_column, table2_name, use_final))
+            gmin = int(min(mm1.iloc[0, 0], mm2.iloc[0, 0]))
+            gmax = int(max(mm1.iloc[0, 1], mm2.iloc[0, 1]))
+        except (ValueError, TypeError):
+            full_scan = True
+
+        if full_scan:
+            chunk_bounds = [(None, None)]
+            head = (f"Chunked validation: chunk_column '{chunk_column}' not numeric -> "
+                    f"single full-table scan")
+        else:
+            chunk_bounds = [(lo, lo + chunk_size - 1) for lo in range(gmin, gmax + 1, chunk_size)]
+            head = (f"Chunked validation: {chunk_column} range [{gmin}, {gmax}], "
+                    f"chunk_size={chunk_size}, total_chunks={len(chunk_bounds)}")
+        total_chunks = len(chunk_bounds)
         logging.info(head); print(head)
 
         all_missing_db1, all_missing_db2, all_diffs = [], [], []
         chunk_idx = 0
-        for lo in range(gmin, gmax + 1, chunk_size):
-            hi = lo + chunk_size - 1
+        for lo, hi in chunk_bounds:
             chunk_idx += 1
-            q1 = build_range_query_multi(database1, id_col, value_columns, table1_name, lo, hi, use_final)
-            q2 = build_range_query_multi(database2, id_col, value_columns, table2_name, lo, hi, use_final)
+            rng = "full-scan" if lo is None else f"{chunk_column}[{lo}-{hi}]"
+            q1 = build_range_query_multi(engine1, key_columns, value_columns, table1_name, chunk_column, lo, hi, use_final)
+            q2 = build_range_query_multi(engine2, key_columns, value_columns, table2_name, chunk_column, lo, hi, use_final)
+            hb.set(f"{table1_name}: chunk {chunk_idx}/{total_chunks} {rng} - fetching")
+            logging.info(f"[phase] chunk {chunk_idx}/{total_chunks} {rng}: fetching from both DBs...")
+            print(f"[phase] chunk {chunk_idx}/{total_chunks} {rng}: fetching from both DBs...")
             with ThreadPoolExecutor() as ex:
                 fu1 = ex.submit(fetch_data, database1, q1)
                 fu2 = ex.submit(fetch_data, database2, q2)
                 d1 = fu1.result()
                 d2 = fu2.result()
-            m1, m2, recs = compare_chunk_multi(d1, d2, value_columns, mode, threshold, database1, database2)
+            hb.set(f"{table1_name}: chunk {chunk_idx}/{total_chunks} {rng} - comparing "
+                   f"({database1}={len(d1)} {database2}={len(d2)} rows)")
+            logging.info(f"[phase] chunk {chunk_idx}/{total_chunks} {rng}: comparing "
+                         f"({database1}={len(d1)} {database2}={len(d2)} rows)...")
+            print(f"[phase] chunk {chunk_idx}/{total_chunks} {rng}: comparing "
+                  f"({database1}={len(d1)} {database2}={len(d2)} rows)...")
+            m1, m2, recs = compare_chunk_multi(d1, d2, key_columns, value_columns, mode, threshold, database1, database2)
             all_missing_db1.extend(m1)
             all_missing_db2.extend(m2)
             all_diffs.extend(recs)
-            msg = (f"[checkpoint] chunk {chunk_idx}/{total_chunks} id[{lo}-{hi}] "
+            msg = (f"[checkpoint] chunk {chunk_idx}/{total_chunks} {rng} "
                    f"rows {database1}={len(d1)} {database2}={len(d2)} | "
                    f"this chunk: missing_{database1}+={len(m1)} missing_{database2}+={len(m2)} diff+={len(recs)} | "
                    f"running totals: missing_{database1}={len(all_missing_db1)} "
                    f"missing_{database2}={len(all_missing_db2)} diff={len(all_diffs)}")
             logging.info(msg); print(msg)
+
+        hb.set(f"{table1_name}: writing output files")
 
         # Write outputs. The output name tag reflects the comparison scope.
         scope_tag = 'missing' if mode == 'missing' else (
@@ -1163,7 +1269,47 @@ def main(config):
         print(f"Validation result saved to ... {output_csv_name}.")
         logging.info(f"Id Differing Values csv file save into {detail_name}")
         print(f"Id Differing Values csv file save into {detail_name}")
-        return
+
+        # Per-table summary .log file (one per validated table).
+        status = ("IN_SYNC" if (len(all_missing_db1) == 0 and len(all_missing_db2) == 0
+                                and len(all_diffs) == 0) else "DIFF")
+        summary_log = (f"{output_csv_name[:-4] if output_csv_name.endswith('.csv') else output_csv_name}"
+                       f"_summary.log")
+        try:
+            with open(summary_log, 'w') as sf:
+                sf.write("==== VALIDATION SUMMARY ====\n")
+                sf.write(f"timestamp           : {timestamp}\n")
+                sf.write(f"status              : {status}\n")
+                sf.write(f"mode                : {mode}\n")
+                sf.write(f"source ({database1}): {table1_name}\n")
+                sf.write(f"target ({database2}): {table2_name}\n")
+                sf.write(f"key columns         : {key_columns}\n")
+                sf.write(f"chunk column        : {chunk_column}\n")
+                sf.write(f"value columns ({len(value_columns)}): {value_columns}\n")
+                sf.write(f"total chunks        : {total_chunks}\n")
+                sf.write(f"missing_in_{database1:<8}: {len(all_missing_db1)}\n")
+                sf.write(f"missing_in_{database2:<8}: {len(all_missing_db2)}\n")
+                sf.write(f"differing_values    : {len(all_diffs)}\n")
+                sf.write(f"result_csv          : {output_csv_name}\n")
+                sf.write(f"detail_csv          : {detail_name}\n")
+            logging.info(f"Summary log saved to {summary_log}")
+            print(f"Summary log saved to {summary_log}")
+        except Exception as e:
+            logging.error(f"Failed writing summary log {summary_log}: {e}")
+
+        hb.stop()
+        return {
+            'summary_log': summary_log,
+            'status': status,
+            'mode': mode,
+            f'missing_in_{database1}': len(all_missing_db1),
+            f'missing_in_{database2}': len(all_missing_db2),
+            'missing_in_source': len(all_missing_db1),
+            'missing_in_target': len(all_missing_db2),
+            'differing_values': len(all_diffs),
+            'result_csv': output_csv_name,
+            'detail_csv': detail_name,
+        }
 
     query1 = construct_query(database1, config[f'{database1}_table_name'], config.get(f'{database1}_database_date_column'))
     query2 = construct_query(database2, config[f'{database2}_table_name'], config.get(f'{database2}_database_date_column'))
