@@ -1,0 +1,337 @@
+source_alias: mysql
+target_alias: ch
+source_engine: mysql
+source_creds: mysql
+source_db: ''
+target_engine: clickhouse
+target_creds: clickhouse
+target_db: batching
+target_prefix: raw_
+mode: full
+id_chunk_size: 2000000
+tables:
+- name: asset_classifications
+  keys:
+  - id
+- name: asset_electricities
+  keys:
+  - id
+- name: asset_inventories
+  keys:
+  - id
+- name: asset_inventory_other_capacities
+  keys:
+  - id
+- name: asset_inventory_rtmds
+  keys:
+  - id
+- name: asset_model_workspaces
+  keys:
+  - id
+- name: asset_models
+  keys:
+  - id
+- name: asset_models_non_temperatures_capacities
+  keys:
+  - id
+- name: asset_models_temperatures_capacities
+  keys:
+  - id
+- name: asset_rtmd_histories
+  keys:
+  - id
+  mode: missing
+- name: asset_rtmds
+  keys:
+  - id
+- name: asset_type_workspaces
+  keys:
+  - id
+- name: asset_types
+  keys:
+  - id
+- name: asset_types_classifications
+  keys:
+  - id
+- name: asset_types_temperatures
+  keys:
+  - id
+- name: asset_vendor_types
+  keys:
+  - id
+- name: asset_vendor_workspaces
+  keys:
+  - id
+- name: asset_vendors
+  keys:
+  - id
+- name: asset_working_statuses
+  keys:
+  - id
+- name: budget_source_workspaces
+  keys:
+  - id
+- name: budget_sources
+  keys:
+  - id
+- name: coldstorage_materials
+  keys:
+  - id
+- name: coldstorage_per_temperature
+  keys:
+  - id
+- name: coldstorages
+  keys:
+  - id
+- name: entities
+  keys:
+  - id
+- name: entity_prep_min_max
+  keys:
+  - id
+- name: entity_tags
+  keys:
+  - id
+- name: entity_types
+  keys:
+  - id
+- name: entity_workspaces
+  keys:
+  - id
+  mode: missing
+- name: integration_asik_aggregate
+  keys:
+  - id
+  mode: missing
+- name: integration_biofarma_orders
+  keys:
+  - id
+- name: integration_biofarma_smdv_orders
+  keys:
+  - id
+- name: locations
+  keys:
+  - id
+- name: manufacture_types
+  keys:
+  - id
+- name: manufacture_workspaces
+  keys:
+  - id
+- name: manufactures
+  keys:
+  - id
+- name: material_levels
+  keys:
+  - id
+- name: material_relations
+  keys:
+  - id
+- name: material_types
+  keys:
+  - id
+- name: material_units
+  keys:
+  - id
+- name: material_volumes
+  keys:
+  - id
+- name: material_workspaces
+  keys:
+  - id
+- name: materials
+  keys:
+  - id
+- name: rabies_vaccine_methods
+  keys:
+  - id
+- name: rabies_vaccine_rules
+  keys:
+  - id
+- name: rabies_vaccine_types
+  keys:
+  - id
+- name: temperature_thresholds
+  keys:
+  - id
+- name: user_workspaces
+  keys:
+  - id
+- name: users
+  keys:
+  - id
+- name: workspaces
+  keys:
+  - id
+- name: ws_activities
+  keys:
+  - id
+- name: ws_annual_need_ipvs
+  keys:
+  - id
+- name: ws_annual_need_results
+  keys:
+  - id
+- name: ws_annual_needs
+  keys:
+  - id
+- name: ws_asset_calibration_schedules
+  keys:
+  - id
+- name: ws_asset_inventories
+  keys:
+  - id
+- name: ws_batches
+  keys:
+  - id
+- name: ws_budget_sources
+  keys:
+  - id
+- name: ws_commitment_items
+  keys:
+  - id
+- name: ws_commitments
+  keys:
+  - id
+- name: ws_consumption_rabies
+  keys:
+  - id
+- name: ws_consumption_reactions
+  keys:
+  - id
+- name: ws_consumptions
+  keys:
+  - id
+- name: ws_contracts
+  keys:
+  - id
+- name: ws_customer_vendor_activities
+  keys:
+  - id
+  mode: missing
+- name: ws_customer_vendors
+  keys:
+  - id
+  mode: missing
+- name: ws_delivery_types
+  keys:
+  - id
+- name: ws_entities
+  keys:
+  - id
+- name: ws_entity_activities
+  keys:
+  - id
+- name: ws_entity_material_activities
+  keys:
+  - id
+  mode: missing
+- name: ws_entity_material_import_logs
+  keys:
+  - id
+- name: ws_manufactures
+  keys:
+  - id
+- name: ws_material_activities
+  keys:
+  - id
+- name: ws_material_companions
+  keys:
+  - id
+- name: ws_material_manufactures
+  keys:
+  - id
+- name: ws_material_permissions
+  keys:
+  - id
+- name: ws_material_ratios
+  keys:
+  - id
+- name: ws_material_substitutions
+  keys:
+  - id
+- name: ws_materials
+  keys:
+  - id
+- name: ws_order_audits
+  keys:
+  - id
+- name: ws_order_comments
+  keys:
+  - id
+- name: ws_order_histories
+  keys:
+  - id
+  mode: missing
+- name: ws_order_item_projection_capacities
+  keys:
+  - id
+- name: ws_order_item_stocks
+  keys:
+  - id
+  mode: missing
+- name: ws_order_other_reasons
+  keys:
+  - id
+- name: ws_order_reasons
+  keys:
+  - id
+- name: ws_order_statuses
+  keys:
+  - id
+- name: ws_order_stock_statuses
+  keys:
+  - id
+- name: ws_order_types
+  keys:
+  - id
+- name: ws_orders
+  keys:
+  - id
+- name: ws_other_reasons
+  keys:
+  - id
+- name: ws_patient_rabies
+  keys:
+  - id
+- name: ws_patients
+  keys:
+  - id
+- name: ws_program_plans
+  keys:
+  - id
+- name: ws_purchases
+  keys:
+  - id
+- name: ws_reconciliations
+  keys:
+  - id
+- name: ws_stock_opname_periods
+  keys:
+  - id
+- name: ws_stock_opnames
+  keys:
+  - id
+  mode: missing
+- name: ws_stocks
+  keys:
+  - id
+- name: ws_transaction_reasons
+  keys:
+  - id
+- name: ws_transaction_types
+  keys:
+  - id
+- name: ws_transactions
+  keys:
+  - id
+  mode: missing
+- name: ws_users
+  keys:
+  - id
+- name: ws_vaccine_rules
+  keys:
+  - id
+- name: ws_vaccine_sequences
+  keys:
+  - id

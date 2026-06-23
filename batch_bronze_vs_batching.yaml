@@ -1,0 +1,475 @@
+source_alias: bronze
+heartbeat_seconds: 30
+target_alias: batch
+source_db: bronze_layer_v5_staging
+target_db: batching
+engine: clickhouse
+creds: clickhouse
+mode: full
+id_chunk_size: 2000000
+tables:
+- name: dashboard_active_rate
+  keys:
+  - program_id
+  - period
+  - province
+  - regency
+  chunk_column: program_id
+- name: dashboard_asset
+  keys:
+  - period
+  - province_id
+  - province_name
+  - regency_id
+  - regency_name
+  - asset_type_id
+  - asset_classifications_id
+  chunk_column: province_id
+- name: dashboard_delivery_time
+  keys:
+  - period
+  - customer_province_id
+  - customer_province_name
+  - customer_regency_id
+  - customer_regency_name
+  - customer_id
+  - customer_name
+  - program_id
+  chunk_column: customer_province_id
+- name: dashboard_discard
+  keys:
+  - program_id
+  - period
+  - entities_province_id
+  - transactions_transaction_reason_id
+  chunk_column: program_id
+- name: dashboard_facility_distribution
+  keys:
+  - program_id
+  - year
+  - entity_province_id
+  - entity_province_name
+  - entity_regency_id
+  - entity_regency_name
+  chunk_column: program_id
+- name: dashboard_info_logger
+  keys:
+  - id_logger
+  chunk_column: id_logger
+- name: dashboard_last_distribution
+  keys:
+  - period
+  - program_id
+  - entities_province_id
+  - entities_regency_id
+  - material_type_id
+  - parent_material_id
+  chunk_column: program_id
+- name: dashboard_logger_summary
+  keys:
+  - entity_id
+  - logger_date
+  - asset_rtmd_id
+  chunk_column: entity_id
+- name: dashboard_logger_summary_asset
+  keys:
+  - week
+  - period
+  - regency_id
+  chunk_column: week
+- name: dashboard_medical_requests
+  keys:
+  - transactions_id
+  chunk_column: transactions_id
+  mode: missing
+- name: dashboard_overdue_calibration
+  keys:
+  - province_id
+  - province_name
+  - regency_id
+  - regency_name
+  chunk_column: province_id
+- name: dashboard_stock_discard
+  keys:
+  - program_id
+  - period
+  - entities_province_id
+  - entities_province_name
+  - entities_regency_id
+  - entities_regency_name
+  - parent_material_id
+  - global_parent_material_id
+  - parent_material_name
+  - reason_category
+  chunk_column: program_id
+- name: dashboard_stock_discard_pending
+  keys:
+  - program_id
+  - entities_province_id
+  - entities_province_name
+  - entities_regency_name
+  - entities_regency_id
+  - parent_material_id
+  - global_parent_material_id
+  - parent_material_name
+  chunk_column: program_id
+- name: dashboard_stock_sufficiency
+  keys:
+  - period
+  - entities_id
+  - parent_material_id
+  - program_id
+  chunk_column: entities_id
+  mode: missing
+- name: dashboard_stock_sufficiency_dump
+  keys:
+  - period
+  - entities_id
+  - parent_material_id
+  - program_id
+  chunk_column: entities_id
+  mode: missing
+- name: dashboard_stock_sufficiency_monthly
+  keys:
+  - period
+  - entities_id
+  - parent_material_id
+  - program_id
+  chunk_column: entities_id
+  mode: missing
+- name: dashboard_stock_sufficiency_monthly_dump
+  keys:
+  - period
+  - entities_id
+  - parent_material_id
+  - program_id
+  chunk_column: entities_id
+  mode: missing
+- name: dashboard_stock_taking
+  keys:
+  - period
+  - stock_opname_program_id
+  - province_id
+  - regency_id
+  chunk_column: stock_opname_program_id
+- name: dashboard_stockmax_rate
+  keys:
+  - period
+  - province_id
+  - regency_id
+  - parent_material_id
+  - program_id
+  chunk_column: province_id
+- name: dashboard_stockout_rate
+  keys:
+  - period
+  - province_id
+  - regency_id
+  - parent_material_id
+  - program_id
+  chunk_column: province_id
+- name: dashboard_wms_active_rate
+  keys:
+  - period
+  - hf_province_id
+  - hf_city_id
+  - hf_tag_id
+  chunk_column: hf_tag_id
+- name: dashboard_wms_active_rate_week
+  keys:
+  - period
+  - hf_province_id
+  - hf_city_id
+  - hf_tag_id
+  chunk_column: hf_tag_id
+- name: dashboard_wms_asset
+  keys:
+  - hf_province_id
+  - hf_city_id
+  - asset_type_id
+  chunk_column: asset_type_id
+- name: dashboard_wms_health_facility_implementor
+  keys:
+  - year
+  - hf_province_id
+  - hf_province_name
+  - hf_city_id
+  - hf_city_name
+  - hf_id
+  chunk_column: year
+- name: dashboard_wms_health_facility_implementor_numerator
+  keys:
+  - year
+  - hf_province_id
+  - hf_province_name
+  - hf_city_id
+  - hf_city_name
+  - hf_id
+  chunk_column: year
+- name: dashboard_wms_lead_time
+  keys:
+  - day
+  - hf_province_id
+  - hf_city_id
+  - hf_id
+  - hf_tag_id
+  chunk_column: hf_id
+- name: dashboard_wms_value_chain
+  keys:
+  - waste_group_id
+  - waste_type_id
+  chunk_column: waste_group_id
+- name: dashboard_wms_waste_generated
+  keys:
+  - month
+  - day
+  - hf_province_id
+  - hf_city_id
+  - waste_group_id
+  - waste_type_id
+  - waste_characteristics_id
+  chunk_column: waste_group_id
+- name: dashboard_wms_waste_stages
+  keys:
+  - month
+  - day
+  - hf_province_id
+  - hf_city_id
+- name: datamart_annual_need
+  keys:
+  - id
+  chunk_column: id
+- name: datamart_assets_v5
+  keys:
+  - id
+  chunk_column: id
+- name: datamart_logger_monitoring
+  keys:
+  - asset_rtmd_id
+  - entity_id
+  - logger_date
+  chunk_column: asset_rtmd_id
+- name: datamart_monitoring_transactions_v5
+  keys:
+  - transactions_id
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_monthly_order_lead_time
+  keys:
+  - customer_id
+  - customer_entity_tag_id
+  - customer_province_id
+  - customer_regency_id
+  - program_id
+  - period
+  chunk_column: customer_id
+- name: datamart_order_difference_v5
+  keys:
+  - id
+  chunk_column: id
+  mode: missing
+- name: datamart_order_list_v5
+  keys:
+  - program_id
+  - order_id
+  chunk_column: program_id
+- name: datamart_orders_smdv
+  keys:
+  - id_wois
+  chunk_column: id_wois
+- name: datamart_quarterly_material_needs
+  keys:
+  - program_id
+  - material_id
+  chunk_column: program_id
+- name: datamart_reconciliations_v5
+  keys:
+  - program_id
+  - reconciliation_id
+  chunk_column: program_id
+- name: datamart_rutin_inventory_v5
+  keys:
+  - transactions_id
+  - program_id
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_rutin_inventory_v5_dump
+  keys:
+  - transactions_id
+  - program_id
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_stock_availability_v5
+  keys:
+  - entities_id
+  - transactions_created_at
+  - transactions_id
+  chunk_column: entities_id
+  mode: missing
+- name: datamart_stock_availability_v5__dbt_backup
+  keys:
+  - entities_id
+  - transactions_created_at
+  - transactions_id
+  chunk_column: entities_id
+- name: datamart_stock_availability_v5_balance
+  keys:
+  - transactions_id
+  - stock_entity_id
+  - stock_program_id
+  - dmm_parent_id
+  - transactions_stock_id
+  - uuid_transform
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_stock_availability_v5_dump
+  keys:
+  - transactions_id
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_stock_availability_v5_partition
+  keys:
+  - entities_id
+  - transactions_created_at
+  - transactions_id
+  chunk_column: entities_id
+  mode: missing
+- name: datamart_stock_opname_v5
+  keys:
+  - stock_opname_program_id
+  - stock_opname_id
+  chunk_column: stock_opname_program_id
+  mode: missing
+- name: datamart_transactions_rabies
+  keys:
+  - transactions_id
+  - consumption_id
+  chunk_column: transactions_id
+- name: datamart_transactions_v5
+  keys:
+  - transactions_id
+  - program_id
+  chunk_column: transactions_id
+  mode: missing
+- name: datamart_vaccine_sequence_dump
+  keys:
+  - patient_id
+  - transactions_id
+  - vaccine_sequence_id
+  - consumption_id
+  chunk_column: patient_id
+- name: datamart_vaccine_sequence_rabies
+  keys:
+  - entity_name
+  - transaction_date
+  - vaccine_sequence_title
+  - status
+- name: datamart_wms_report_assets
+  keys:
+  - hf_id
+  - healthcare_asset_id
+  chunk_column: hf_id
+- name: datamart_wms_report_partners
+  keys:
+  - partner_id
+  - hf_id
+  - waste_group_id
+  - waste_type_id
+  - waste_characteristics_id
+  chunk_column: partner_id
+- name: datamart_wms_report_waste_bags
+  keys:
+  - waste_bag_id
+- name: datamart_wms_report_waste_bags_log
+  keys:
+  - id
+  chunk_column: id
+- name: datamart_wms_report_waste_bags_log_merge
+  keys:
+  - id
+  chunk_column: id
+- name: datamart_wms_report_waste_bags_log_old
+  keys:
+  - id
+  chunk_column: id
+- name: datamart_wms_report_waste_bags_merge
+  keys:
+  - waste_bag_id
+- name: datamart_wms_report_waste_bags_old
+  keys:
+  - waste_bag_id
+- name: dim_annual_achievement_need
+  keys:
+  - entity_id
+  - year
+  - entity_tag_id
+  - province_id
+  - regency_id
+  chunk_column: entity_id
+- name: dim_annual_coldstorage_per_temp
+  keys:
+  - entity_id
+  - year
+  - min_temp
+  - max_temp
+  chunk_column: entity_id
+- name: dim_annual_need_entity
+  keys:
+  - province_id
+  - province_name
+  - regency_id
+  - regency_name
+  - entity_id
+  - entity_name
+  - entity_type
+  - entity_tag_id
+  - year
+  chunk_column: province_id
+- name: dim_annual_need_material
+  keys:
+  - province_id
+  - regency_id
+  - entity_id
+  - entity_tag_id
+  - year
+  - material_id
+  chunk_column: province_id
+- name: dim_asik_material_mapping
+  keys:
+  - asik_material_id
+  chunk_column: asik_material_id
+- name: dim_coldstorage_materials
+  keys:
+  - id
+  chunk_column: id
+- name: dim_coldstorages
+  keys:
+  - id
+  chunk_column: id
+- name: dim_commitment_items
+  keys:
+  - id
+  chunk_column: id
+- name: dim_commitments
+  keys:
+  - id
+  chunk_column: id
+- name: dim_ws_customer_vendors
+  keys:
+  - id
+  chunk_column: id
+  mode: missing
+- name: dim_ws_entity_material_activities
+  keys:
+  - program_id
+  - ema_activity_id
+  - entity_activity_id
+  - ema_id
+  chunk_column: program_id
+  mode: missing
+- name: platinum_stock_sufficiency
+  keys:
+  - entities_id
+  - parent_material_id
+  - program_id
+  chunk_column: entities_id
